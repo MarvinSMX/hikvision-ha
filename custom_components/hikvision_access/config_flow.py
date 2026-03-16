@@ -5,6 +5,8 @@ import logging
 from typing import Any
 import xml.etree.ElementTree as ET
 
+import warnings
+
 import requests
 from requests.auth import HTTPDigestAuth
 import voluptuous as vol
@@ -60,12 +62,14 @@ def _connect_and_detect(
     # --- Step 1: verify connectivity + auth via capabilities ---
     caps_url = f"https://{host}{ACS_CAPS_PATH}"
     try:
-        resp = requests.get(
-            caps_url,
-            auth=auth,
-            verify=verify_ssl,
-            timeout=10,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            resp = requests.get(
+                caps_url,
+                auth=auth,
+                verify=verify_ssl,
+                timeout=10,
+            )
         if resp.status_code == 401:
             return "invalid_auth", None
         if resp.status_code != 200:
@@ -82,12 +86,14 @@ def _connect_and_detect(
     # --- Step 2: fetch device name from System/deviceInfo ---
     info_url = f"https://{host}{DEVICE_INFO_PATH}"
     try:
-        resp = requests.get(
-            info_url,
-            auth=auth,
-            verify=verify_ssl,
-            timeout=10,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            resp = requests.get(
+                info_url,
+                auth=auth,
+                verify=verify_ssl,
+                timeout=10,
+            )
         if resp.status_code == 200:
             root = ET.fromstring(resp.text)
             # Try with and without namespace

@@ -123,24 +123,34 @@ class HikvisionCoordinator:
     def configure_device(self, ha_url: str, webhook_id: str) -> None:
         """PUT the HA webhook URL into the device's httpHosts slot 1.
 
+        Mirrors the device's own GET response structure exactly so the PUT is
+        accepted.  Both slots are included in the body (device requires the
+        full list).  Slot 2 is left zeroed / empty.
+
         Runs in the executor thread (blocking requests call).
         """
+        import warnings  # noqa: PLC0415
+
         parsed = urlparse(ha_url)
         ip_or_host = parsed.hostname or self._host
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         protocol = "HTTPS" if parsed.scheme == "https" else "HTTP"
         webhook_path = f"/api/webhook/{webhook_id}"
 
-        # The device uses HttpHostNotificationList / HttpHostNotification schema.
-        # We send only slot 1; slot 2 stays untouched (device merges by id).
+        # Build a body that mirrors the GET response from the device.
+        # Key points:
+        #   - parameterFormatType left EMPTY (device rejects "JSON")
+        #   - Both slots are included so the device accepts the PUT
+        #   - SubscribeEvent / eventMode=all ensures all access events are sent
         xml_body = (
             '<?xml version="1.0" encoding="UTF-8"?>'
             f'<HttpHostNotificationList version="2.0" xmlns="{_ISAPI_NS}">'
+            # --- slot 1: our webhook ---
             "<HttpHostNotification>"
             f"<id>{_HTTP_HOST_SLOT}</id>"
             f"<url>{webhook_path}</url>"
             f"<protocolType>{protocol}</protocolType>"
-            "<parameterFormatType>JSON</parameterFormatType>"
+            "<parameterFormatType></parameterFormatType>"
             "<addressingFormatType>ipaddress</addressingFormatType>"
             f"<ipAddress>{ip_or_host}</ipAddress>"
             f"<portNo>{port}</portNo>"
@@ -150,22 +160,36 @@ class HikvisionCoordinator:
             "<eventMode>all</eventMode>"
             "</SubscribeEvent>"
             "</HttpHostNotification>"
+            # --- slot 2: left empty / zeroed ---
+            "<HttpHostNotification>"
+            "<id>2</id>"
+            "<url></url>"
+            "<protocolType>HTTP</protocolType>"
+            "<parameterFormatType></parameterFormatType>"
+            "<addressingFormatType>ipaddress</addressingFormatType>"
+            "<ipAddress>0.0.0.0</ipAddress>"
+            "<portNo>0</portNo>"
+            "<httpAuthenticationMethod>none</httpAuthenticationMethod>"
+            "</HttpHostNotification>"
             "</HttpHostNotificationList>"
         )
 
         url = f"https://{self._host}{HTTP_HOSTS_PATH}"
         try:
-            resp = requests.put(
-                url,
-                data=xml_body.encode("utf-8"),
-                auth=HTTPDigestAuth(self._username, self._password),
-                headers={"Content-Type": "application/xml"},
-                verify=self._verify_ssl,
-                timeout=10,
-            )
+            # Suppress InsecureRequestWarning for intentional verify=False
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                resp = requests.put(
+                    url,
+                    data=xml_body.encode("utf-8"),
+                    auth=HTTPDigestAuth(self._username, self._password),
+                    headers={"Content-Type": "application/xml"},
+                    verify=self._verify_ssl,
+                    timeout=10,
+                )
             if resp.status_code in (200, 201):
                 _LOGGER.info(
-                    "Hikvision [%s]: configured push to %s%s",
+                    "Hikvision [%s]: push configured → %s%s",
                     self._host,
                     ha_url,
                     webhook_path,
@@ -177,7 +201,7 @@ class HikvisionCoordinator:
                     "events may not arrive. Body: %s",
                     self._host,
                     resp.status_code,
-                    resp.text[:200],
+                    resp.text[:300],
                 )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning(
