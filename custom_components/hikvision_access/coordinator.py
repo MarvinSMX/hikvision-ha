@@ -14,12 +14,21 @@ from requests.auth import HTTPDigestAuth
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    ACCESS_DENIED_CODES,
+    ACCESS_GRANTED_CODES,
+    ACCESS_STATUS_DENIED,
+    ACCESS_STATUS_GRANTED,
+    ACE_MAJOR_ACCESS,
+    ACE_SUB_DOOR_CLOSED,
+    ACE_SUB_DOOR_OPEN,
+    ACE_SUB_PERSON_VERIFIED,
     BINARY_SENSOR_ACTIVE_SECONDS,
     CONF_HOST,
     CONF_NAME,
     CONF_PASSWORD,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
+    EVENT_LABELS,
     EVENT_TYPE,
     RECONNECT_DELAY,
     STREAM_PATH,
@@ -47,6 +56,9 @@ class HikvisionStreamCoordinator:
         self._running = False
 
         self.last_event: dict[str, Any] | None = None
+        self.last_person_event: dict[str, Any] | None = None
+        self.door_is_open: bool | None = None      # None = unknown until first door event
+        self.last_access_status: str | None = None  # "granted" | "denied" | None
         self.stream_status: str = STREAM_STATUS_DISCONNECTED
 
         self._listeners: list[Callable] = []
@@ -189,6 +201,7 @@ class HikvisionStreamCoordinator:
         ace: dict = payload.get("AccessControllerEvent", {})
         major = ace.get("majorEventType")
         sub = ace.get("subEventType")
+        event_code = f"{major}_{sub}"
         return {
             "device_name": ace.get("deviceName"),
             "ip": payload.get("ipAddress"),
@@ -197,17 +210,42 @@ class HikvisionStreamCoordinator:
             "event_state": payload.get("eventState"),
             "major": major,
             "sub": sub,
-            "event_code": f"{major}_{sub}",
+            "event_code": event_code,
+            "event_label": EVENT_LABELS.get(event_code, event_code),
             "verify_no": ace.get("verifyNo"),
             "serial_no": ace.get("serialNo"),
             "remote_host": ace.get("remoteHostAddr"),
             "attendance_status": ace.get("attendanceStatus"),
             "mask": ace.get("mask"),
+            # Person fields (present on successful verification events)
+            "person_name": ace.get("name"),
+            "card_no": ace.get("cardNo"),
+            "employee_no": ace.get("employeeNoString"),
+            "verify_mode": ace.get("currentVerifyMode"),
             "raw": payload,
         }
 
     def _dispatch_event(self, event: dict) -> None:
         """Called in the HA event loop. Fires bus event and notifies listeners."""
+        # Update derived state before notifying entities
+        major = event.get("major")
+        sub = event.get("sub")
+
+        event_code = event.get("event_code", "")
+
+        if major == ACE_MAJOR_ACCESS:
+            if sub == ACE_SUB_PERSON_VERIFIED and event.get("person_name"):
+                self.last_person_event = event
+            elif sub == ACE_SUB_DOOR_OPEN:
+                self.door_is_open = True
+            elif sub == ACE_SUB_DOOR_CLOSED:
+                self.door_is_open = False
+
+        if event_code in ACCESS_GRANTED_CODES:
+            self.last_access_status = ACCESS_STATUS_GRANTED
+        elif event_code in ACCESS_DENIED_CODES:
+            self.last_access_status = ACCESS_STATUS_DENIED
+
         self.hass.bus.async_fire(EVENT_TYPE, event)
         for listener in list(self._listeners):
             try:

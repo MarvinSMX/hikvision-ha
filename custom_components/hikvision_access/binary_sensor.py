@@ -1,7 +1,6 @@
 """Binary sensor entities for Hikvision Access Control."""
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -24,22 +23,36 @@ async def async_setup_entry(
 ) -> None:
     """Set up Hikvision binary sensors from a config entry."""
     coordinator: HikvisionStreamCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([HikvisionLastEventActiveSensor(coordinator, entry)])
+    async_add_entities(
+        [
+            HikvisionLastEventActiveSensor(coordinator, entry),
+            HikvisionDoorSensor(coordinator, entry),
+        ]
+    )
+
+
+def _device_info(coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> dict:
+    return {
+        "identifiers": {(DOMAIN, entry.entry_id)},
+        "name": coordinator.name,
+        "manufacturer": "Hikvision",
+        "model": "Access Controller",
+        "configuration_url": f"https://{entry.data['host']}",
+    }
 
 
 class HikvisionLastEventActiveSensor(BinarySensorEntity):
-    """Binary sensor that goes ON for a few seconds when any event arrives."""
+    """Pulses ON for a few seconds on every incoming event (any type).
+
+    Useful as a general 'something happened at the door' trigger.
+    """
 
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_device_class = BinarySensorDeviceClass.MOTION
     _attr_icon = "mdi:motion-sensor"
 
-    def __init__(
-        self,
-        coordinator: HikvisionStreamCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
+    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_last_event_active"
@@ -47,21 +60,12 @@ class HikvisionLastEventActiveSensor(BinarySensorEntity):
         self._attr_is_on = False
         self._reset_task: Any = None
         self._unsub: Any = None
-
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": coordinator.name,
-            "manufacturer": "Hikvision",
-            "model": "Access Controller",
-            "configuration_url": f"https://{entry.data['host']}",
-        }
+        self._attr_device_info = _device_info(coordinator, entry)
 
     async def async_added_to_hass(self) -> None:
-        """Register coordinator listener."""
         self._unsub = self._coordinator.add_listener(self._handle_update)
 
     async def async_will_remove_from_hass(self) -> None:
-        """Clean up listener and any pending reset task."""
         if self._unsub:
             self._unsub()
         if self._reset_task:
@@ -69,19 +73,12 @@ class HikvisionLastEventActiveSensor(BinarySensorEntity):
 
     @callback
     def _handle_update(self) -> None:
-        """Called by the coordinator when a new event arrives."""
         if self._coordinator.last_event is None:
             return
-
-        # Turn on
         self._attr_is_on = True
         self.async_write_ha_state()
-
-        # Cancel any pending auto-reset
         if self._reset_task:
             self._reset_task()
-
-        # Schedule auto-reset
         self._reset_task = async_call_later(
             self.hass,
             BINARY_SENSOR_ACTIVE_SECONDS,
@@ -90,7 +87,50 @@ class HikvisionLastEventActiveSensor(BinarySensorEntity):
 
     @callback
     def _async_reset(self, _now: Any = None) -> None:
-        """Turn the sensor off again after the timeout."""
         self._attr_is_on = False
         self._reset_task = None
+        self.async_write_ha_state()
+
+
+class HikvisionDoorSensor(BinarySensorEntity):
+    """Real-time door contact state derived from the event stream.
+
+    on  = door is open  (event 5_22)
+    off = door is closed (event 5_21)
+    unknown = no door event received since HA start
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_device_class = BinarySensorDeviceClass.DOOR
+
+    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_door"
+        self._attr_name = f"{coordinator.name} Tür"
+        self._unsub: Any = None
+        self._attr_device_info = _device_info(coordinator, entry)
+
+    async def async_added_to_hass(self) -> None:
+        self._unsub = self._coordinator.add_listener(self._handle_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._unsub:
+            self._unsub()
+
+    @property
+    def is_on(self) -> bool | None:
+        return self._coordinator.door_is_open
+
+    @property
+    def icon(self) -> str:
+        if self._coordinator.door_is_open is True:
+            return "mdi:door-open"
+        if self._coordinator.door_is_open is False:
+            return "mdi:door-closed"
+        return "mdi:door"
+
+    @callback
+    def _handle_update(self) -> None:
         self.async_write_ha_state()

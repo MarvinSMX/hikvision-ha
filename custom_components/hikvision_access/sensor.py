@@ -3,16 +3,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    DOMAIN,
-    STREAM_STATUS_DISCONNECTED,
-)
+from .const import ACCESS_STATUS_DENIED, ACCESS_STATUS_GRANTED, DOMAIN
 from .coordinator import HikvisionStreamCoordinator
 
 
@@ -28,6 +25,8 @@ async def async_setup_entry(
         [
             HikvisionLastEventSensor(coordinator, entry),
             HikvisionLastEventTimeSensor(coordinator, entry),
+            HikvisionLastPersonSensor(coordinator, entry),
+            HikvisionAccessStatusSensor(coordinator, entry),
             HikvisionStreamStatusSensor(coordinator, entry),
         ]
     )
@@ -70,7 +69,7 @@ class _HikvisionBaseSensor(SensorEntity):
 
 
 class HikvisionLastEventSensor(_HikvisionBaseSensor):
-    """Sensor that shows the event code of the last received event."""
+    """Sensor that shows a human-readable label of the last received event."""
 
     _attr_icon = "mdi:door-open"
     _attr_translation_key = "last_event"
@@ -84,7 +83,7 @@ class HikvisionLastEventSensor(_HikvisionBaseSensor):
     def native_value(self) -> str | None:
         if self._coordinator.last_event is None:
             return None
-        return self._coordinator.last_event.get("event_code")
+        return self._coordinator.last_event.get("event_label")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -92,16 +91,16 @@ class HikvisionLastEventSensor(_HikvisionBaseSensor):
         if event is None:
             return {}
         return {
+            "event_code": event.get("event_code"),
             "device_name": event.get("device_name"),
             "ip": event.get("ip"),
             "timestamp": event.get("timestamp"),
             "major": event.get("major"),
             "sub": event.get("sub"),
+            "person_name": event.get("person_name"),
             "verify_no": event.get("verify_no"),
             "serial_no": event.get("serial_no"),
             "remote_host": event.get("remote_host"),
-            "attendance_status": event.get("attendance_status"),
-            "mask": event.get("mask"),
             "event_state": event.get("event_state"),
         }
 
@@ -122,6 +121,78 @@ class HikvisionLastEventTimeSensor(_HikvisionBaseSensor):
         if self._coordinator.last_event is None:
             return None
         return self._coordinator.last_event.get("timestamp")
+
+
+class HikvisionLastPersonSensor(_HikvisionBaseSensor):
+    """Sensor that shows the name of the last successfully verified person."""
+
+    _attr_icon = "mdi:account-check"
+    _attr_translation_key = "last_person"
+
+    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_last_person"
+        self._attr_name = f"{coordinator.name} Last Person"
+
+    @property
+    def native_value(self) -> str | None:
+        if self._coordinator.last_person_event is None:
+            return None
+        return self._coordinator.last_person_event.get("person_name")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        event = self._coordinator.last_person_event
+        if event is None:
+            return {}
+        return {
+            "timestamp": event.get("timestamp"),
+            "card_no": event.get("card_no"),
+            "employee_no": event.get("employee_no"),
+            "verify_mode": event.get("verify_mode"),
+            "verify_no": event.get("verify_no"),
+            "event_code": event.get("event_code"),
+        }
+
+
+class HikvisionAccessStatusSensor(_HikvisionBaseSensor):
+    """Sensor showing the last access control outcome: granted or denied.
+
+    The state persists until overwritten by the next access event.
+    Use the hikvision_access_event bus event for reliable automation triggers
+    on repeated identical outcomes.
+    """
+
+    _attr_translation_key = "access_status"
+
+    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_access_status"
+        self._attr_name = f"{coordinator.name} Zugang"
+
+    @property
+    def native_value(self) -> str | None:
+        return self._coordinator.last_access_status
+
+    @property
+    def icon(self) -> str:
+        if self._coordinator.last_access_status == ACCESS_STATUS_GRANTED:
+            return "mdi:lock-open-variant"
+        if self._coordinator.last_access_status == ACCESS_STATUS_DENIED:
+            return "mdi:lock-alert"
+        return "mdi:lock-question"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        event = self._coordinator.last_person_event
+        if event is None:
+            return {}
+        return {
+            "person_name": event.get("person_name"),
+            "timestamp": event.get("timestamp"),
+            "employee_no": event.get("employee_no"),
+            "verify_mode": event.get("verify_mode"),
+        }
 
 
 class HikvisionStreamStatusSensor(_HikvisionBaseSensor):

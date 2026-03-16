@@ -1,88 +1,236 @@
-# Hikvision Access Control – Home Assistant Integration
+# Hikvision Access Control für Home Assistant
 
-HACS-kompatible Custom Integration für Hikvision Face Terminal / Access Controller (DS-K1T671 u.ä.).
+HACS-Integration für Hikvision Face Terminal und Access Controller (z. B. DS-K1T671).  
+Verbindet sich dauerhaft per HTTPS mit dem Gerät und liefert Zutritts-Events, Personenerkennung und Türstatus in Echtzeit nach Home Assistant.
 
-## Funktionsweise
-
-Die Integration verbindet sich dauerhaft per HTTPS Digest Auth mit dem ISAPI alertStream-Endpoint des Gerätes und verarbeitet jeden eingehenden `AccessControllerEvent` in Echtzeit.
+---
 
 ## Voraussetzungen
 
 - Home Assistant 2023.1 oder neuer
-- Hikvision Access Controller mit aktiviertem ISAPI-Eventstream
-- Netzwerkzugang vom HA-Host zum Gerät
+- HACS installiert
+- Hikvision Access Controller im lokalen Netzwerk erreichbar
+- Admin-Benutzername und Passwort des Geräts
 
-## Installation via HACS
+---
 
-1. HACS öffnen → **Integrationen** → **Benutzerdefinierte Repositories**
-2. URL dieses Repositories eintragen, Typ: **Integration**
-3. **Hikvision Access Control** suchen und installieren
+## Installation
+
+1. HACS öffnen → **Integrationen** → Menü oben rechts → **Benutzerdefinierte Repositories**
+2. URL dieses Repositories eintragen, Typ **Integration** auswählen → **Hinzufügen**
+3. Integration **Hikvision Access Control** suchen und **Herunterladen**
 4. Home Assistant neu starten
 5. **Einstellungen → Geräte & Dienste → Integration hinzufügen → Hikvision Access Control**
 
-## Konfigurationsfelder
+---
+
+## Einrichtung
+
+Beim Hinzufügen der Integration erscheinen zwei Schritte:
+
+**Schritt 1 – Verbindungsdaten**
 
 | Feld | Beschreibung |
 |------|-------------|
-| Host | IP-Adresse oder Hostname des Gerätes |
-| Benutzername | Admin-Benutzer des Gerätes |
-| Passwort | Passwort des Benutzers |
-| SSL verifizieren | Bei selbstsigniertem Zertifikat: deaktiviert lassen |
-| Name | Anzeigename der Integration (z. B. "Hintereingang") |
+| Host | IP-Adresse oder Hostname des Geräts (z. B. `192.168.178.20`) |
+| Benutzername | Admin-Benutzername des Geräts |
+| Passwort | Passwort (wird verschlüsselt gespeichert) |
+| SSL verifizieren | Bei selbstsigniertem Zertifikat **deaktiviert** lassen |
 
-## Bereitgestellte Entities
+**Schritt 2 – Gerätename bestätigen**
+
+Die Integration liest beim Verbinden automatisch den Gerätenamen aus dem ersten Event (`deviceName`) aus und schlägt ihn als Anzeigenamen vor. Du kannst ihn hier anpassen.
+
+---
+
+## Entities
+
+Nach der Einrichtung erscheinen folgende Entities unter dem Gerät:
 
 ### Sensoren
 
-- `sensor.{name}_last_event` – Letzter Event-Code (`major_sub`, z. B. `2_39`)
-- `sensor.{name}_last_event_time` – Zeitstempel des letzten Events
-- `sensor.{name}_stream_status` – Verbindungsstatus (`connected` / `disconnected` / `reconnecting`)
+| Entity | Beschreibung | Beispielwert |
+|--------|-------------|--------------|
+| `sensor.{name}_last_event` | Letztes Ereignis in Klartext | `Zugang gewährt` |
+| `sensor.{name}_last_event_time` | Zeitstempel des letzten Ereignisses | `2024-07-26T15:56:48+02:00` |
+| `sensor.{name}_last_person` | Name der zuletzt erkannten Person | `Max Mustermann` |
+| `sensor.{name}_zugang` | Letzter Zugangsstatus | `granted` / `denied` |
+| `sensor.{name}_stream_status` | Verbindungsstatus zur Kamera | `connected` |
+
+**`sensor.{name}_zugang`** — Zustände:
+
+| Zustand | Bedeutung |
+|---------|-----------|
+| `granted` | Zugang gewährt (Gesicht / Karte / Fingerabdruck erkannt) |
+| `denied` | Zugang verweigert |
+| *(leer)* | Noch kein Zugangs-Event seit HA-Start |
+
+Der Sensor bleibt dauerhaft im letzten Zustand. Für wiederholte Automation-Trigger nutze den [Event Bus](#event-bus).
+
+**`sensor.{name}_last_person`** — Attribute:
+
+| Attribut | Beschreibung |
+|----------|-------------|
+| `timestamp` | Zeitpunkt der Erkennung |
+| `card_no` | Kartennummer |
+| `employee_no` | Mitarbeiternummer |
+| `verify_mode` | Verifizierungsmethode (`cardOrFaceOrFp`) |
+| `verify_no` | Laufende Verifizierungsnummer |
+
+---
 
 ### Binary Sensoren
 
-- `binary_sensor.{name}_last_event_active` – Für 3 Sekunden `on` bei jedem eingehenden Event
+| Entity | Beschreibung |
+|--------|-------------|
+| `binary_sensor.{name}_tür` | `on` = Tür offen, `off` = Tür geschlossen |
+| `binary_sensor.{name}_event_active` | 3 Sekunden `on` bei jedem eingehenden Event |
 
-## HA Event Bus
+---
 
-Bei jedem Event wird `hikvision_access_event` gefeuert:
+## Event Bus
+
+Bei **jedem** eingehenden Event wird `hikvision_access_event` auf dem HA Event Bus gefeuert.  
+Damit lassen sich auch mehrfach aufeinanderfolgende Events vom selben Typ zuverlässig in Automationen auslösen.
+
+**Payload:**
 
 ```yaml
-event_type: hikvision_access_event
-event_data:
-  device_name: "Hintereingang Halle"
-  ip: "10.69.100.207"
-  timestamp: "2023-11-06T22:39:31+01:00"
-  event_code: "3_80"
-  major: 3
-  sub: 80
-  verify_no: 168
-  serial_no: 24
+device_name: "Living Room"
+ip: "10.69.100.207"
+timestamp: "2024-07-26T15:56:48+02:00"
+event_code: "5_75"
+event_label: "Zugang gewährt"
+major: 5
+sub: 75
+person_name: "Max Mustermann"
+employee_no: "245"
+verify_mode: "cardOrFaceOrFp"
+verify_no: 238
+serial_no: 277
 ```
 
-## Beispiel-Automation
+---
+
+## Automationen
+
+### Benachrichtigung bei Zugang
 
 ```yaml
 automation:
-  - alias: "Hikvision Zutritt erkannt"
+  - alias: "Zutritt erkannt"
     trigger:
-      platform: event
-      event_type: hikvision_access_event
-    condition:
-      condition: template
-      value_template: "{{ trigger.event.data.event_code == '2_39' }}"
+      - platform: state
+        entity_id: sensor.living_room_zugang
+        to: "granted"
     action:
-      service: notify.mobile_app_dein_handy
-      data:
-        message: "Zugang: {{ trigger.event.data.device_name }}"
+      - service: notify.mobile_app_dein_handy
+        data:
+          title: "Zutritt"
+          message: >
+            {{ state_attr('sensor.living_room_last_person', 'timestamp') | as_timestamp | timestamp_custom('%H:%M') }}
+            Uhr – {{ states('sensor.living_room_last_person') }}
 ```
 
-## Bekannte Event-Codes (Hikvision DS-K1T671)
+### Zugang verweigert – Alarm
 
-| Code | Bedeutung (zu verifizieren) |
-|------|---------------------------|
-| `2_39` | Erfolgreich verifiziert (Gesicht / Karte) |
-| `2_1031` | Unbekannte Person / Verifikation fehlgeschlagen |
-| `3_80` | Tür geöffnet (Relais) |
-| `3_112` | Remote-Öffnung (Innenknopf / Software) |
+```yaml
+automation:
+  - alias: "Zugang verweigert – Alarm"
+    trigger:
+      - platform: state
+        entity_id: sensor.living_room_zugang
+        to: "denied"
+    action:
+      - service: notify.mobile_app_dein_handy
+        data:
+          title: "Zugang verweigert!"
+          message: "Unbekannte Person am Living Room"
+```
 
-> Die Bedeutungen sollten durch eigene Tests am Gerät verifiziert werden.
+### Tür bleibt offen – Warnung
+
+```yaml
+automation:
+  - alias: "Tür offen – Warnung nach 30 Sekunden"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.living_room_tür
+        to: "on"
+        for: "00:00:30"
+    action:
+      - service: notify.mobile_app_dein_handy
+        data:
+          message: "Achtung: Living Room seit 30 Sekunden offen!"
+```
+
+### Event Bus – wiederholte Events auslösen
+
+```yaml
+automation:
+  - alias: "Jeden Zutritt loggen"
+    trigger:
+      - platform: event
+        event_type: hikvision_access_event
+    condition:
+      - condition: template
+        value_template: "{{ trigger.event.data.event_label == 'Zugang gewährt' }}"
+    action:
+      - service: logbook.log
+        data:
+          name: "Living Room"
+          message: >
+            {{ trigger.event.data.person_name }} –
+            {{ trigger.event.data.timestamp }}
+```
+
+---
+
+## Bekannte Event-Codes
+
+Die Integration übersetzt bekannte Codes automatisch in Klartext.  
+Unbekannte Codes erscheinen als `major_sub` (z. B. `2_39`) und können in `const.py` ergänzt werden.
+
+| Code | Klartext | Beschreibung |
+|------|----------|-------------|
+| `5_75` | Zugang gewährt | Gesicht / Karte / Fingerabdruck erfolgreich |
+| `5_22` | Tür geöffnet | Türkontakt: offen |
+| `5_21` | Tür geschlossen | Türkontakt: geschlossen |
+| `3_112` | Fernöffnung | Öffnung per Software / Innenknopf |
+| `3_80` | Tür geöffnet (Relais) | Relais hat ausgelöst |
+| `2_39` | Ereignis erkannt | Bedeutung gerätespezifisch |
+| `2_1031` | Zugang verweigert | Unbekannte Person / Verifikation fehlgeschlagen |
+
+> Eigene Codes kannst du durch Testen am Gerät ermitteln und in `custom_components/hikvision_access/const.py` unter `EVENT_LABELS` eintragen.
+
+---
+
+## Verbindungs-Diagnose
+
+`sensor.{name}_stream_status` zeigt den aktuellen Zustand der Stream-Verbindung:
+
+| Zustand | Bedeutung |
+|---------|-----------|
+| `connected` | Verbunden, Events werden empfangen |
+| `reconnecting` | Verbindungsaufbau läuft |
+| `disconnected` | Verbindung getrennt, nächster Versuch in 5 s |
+
+Die Integration verbindet sich bei Verbindungsverlust automatisch neu.
+
+---
+
+## Fehlerbehebung
+
+**Integration wird nicht gefunden in HACS**  
+→ Repository unter *Benutzerdefinierte Repositories* hinzufügen (siehe Installation)
+
+**Verbindung schlägt fehl**  
+→ IP-Adresse und Netzwerkzugang vom HA-Host zum Gerät prüfen  
+→ SSL verifizieren deaktivieren (Gerät nutzt selbstsigniertes Zertifikat)
+
+**Authentifizierung fehlgeschlagen**  
+→ Benutzername und Passwort prüfen. Der Benutzer benötigt ISAPI-Zugriff (Admin-Rechte)
+
+**Kein Stream, keine Events**  
+→ Am Gerät prüfen: Einstellungen → Netzwerk → Erweiterte Einstellungen → HTTPS aktiviert?  
+→ HA-Logs unter *Einstellungen → System → Logs* auf Fehler von `hikvision_access` prüfen

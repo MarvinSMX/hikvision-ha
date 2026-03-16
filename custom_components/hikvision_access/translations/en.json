@@ -38,6 +38,16 @@
       "last_event_time": {
         "name": "Last Event Time"
       },
+      "last_person": {
+        "name": "Last Person"
+      },
+      "access_status": {
+        "name": "Access",
+        "state": {
+          "granted": "Granted",
+          "denied": "Denied"
+        }
+      },
       "stream_status": {
         "name": "Stream Status",
         "state": {
@@ -50,7 +60,10 @@
     "binary_sensor": {
       "last_event_active": {
         "name": "Event Active"
-      }
+      },
+      "door": {
+        "name": "Door"
+      },
     }
   }
 }
