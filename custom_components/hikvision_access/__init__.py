@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 import secrets
 
+from urllib.parse import urlparse
+
 from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -40,13 +42,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     # --- Register webhook ---
+    # local_only=False: the Hikvision device may be on a different subnet
+    # (e.g. 10.69.x) from HA (192.168.x), or may reach HA via an external
+    # domain.  The random webhook token already provides security.
     webhook.async_register(
         hass,
         DOMAIN,
         coordinator.name,
         webhook_id,
         coordinator.async_handle_webhook,
-        local_only=True,  # only accept requests from the local network
     )
 
     # --- Entities first so listeners are ready before any events arrive ---
@@ -54,6 +58,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.start()
 
     # --- Configure device push (best-effort; logged but not fatal) ---
+    # Priority: use get_url() so that a custom domain (e.g. rtoshass.rto.de)
+    # or HTTPS reverse proxy is used when configured.  configure_device handles
+    # both IP addresses and hostnames automatically.  Fall back to local_ip if
+    # get_url() is not available.
+    ha_url: str | None = None
     try:
         ha_url = get_url(
             hass,
@@ -63,19 +72,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             require_ssl=False,
         )
     except NoURLAvailableError:
-        # Fallback: construct from the HA API binding
-        local_ip = hass.config.api.local_ip if hass.config.api else "localhost"
-        port = hass.config.api.port if hass.config.api else 8123
-        ha_url = f"http://{local_ip}:{port}"
-        _LOGGER.warning(
-            "Hikvision [%s]: no internal URL configured in HA — using %s",
-            entry.data.get("host"),
-            ha_url,
-        )
+        if hass.config.api:
+            ip = hass.config.api.local_ip
+            port = hass.config.api.port or 8123
+            ha_url = f"http://{ip}:{port}"
 
-    await hass.async_add_executor_job(
-        coordinator.configure_device, ha_url, webhook_id
-    )
+    if not ha_url:
+        _LOGGER.warning(
+            "Hikvision [%s]: could not determine HA URL — "
+            "device push notification will not be configured automatically",
+            entry.data.get("host"),
+        )
+    else:
+        await hass.async_add_executor_job(
+            coordinator.configure_device, ha_url, webhook_id
+        )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True

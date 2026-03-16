@@ -19,6 +19,7 @@ The coordinator:
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import logging
 from collections.abc import Callable
@@ -175,14 +176,50 @@ class HikvisionCoordinator:
                     if elem is not None:
                         elem.text = value
 
+                # Detect whether ha_url contains an IP or a hostname.
+                # Hikvision uses different XML fields for each case:
+                #   IP       → addressingFormatType=ipaddress + <ipAddress>
+                #   hostname → addressingFormatType=hostname  + <hostName>
+                try:
+                    ipaddress.ip_address(ip_or_host)
+                    use_ip = True
+                except ValueError:
+                    use_ip = False
+
                 found = False
                 for host_elem in root.findall(f"{nsp}HttpHostNotification"):
                     id_elem = host_elem.find(f"{nsp}id")
                     if id_elem is not None and id_elem.text == str(_HTTP_HOST_SLOT):
                         _set(host_elem, "url", webhook_path)
-                        _set(host_elem, "ipAddress", ip_or_host)
                         _set(host_elem, "portNo", str(port))
                         _set(host_elem, "protocolType", protocol)
+
+                        if use_ip:
+                            _set(host_elem, "addressingFormatType", "ipaddress")
+                            _set(host_elem, "ipAddress", ip_or_host)
+                            # Clear hostName if it exists
+                            hn = host_elem.find(f"{nsp}hostName")
+                            if hn is not None:
+                                hn.text = ""
+                        else:
+                            _set(host_elem, "addressingFormatType", "hostname")
+                            # Reuse <ipAddress> field as <hostName> if device
+                            # supports it; otherwise insert a <hostName> node.
+                            hn = host_elem.find(f"{nsp}hostName")
+                            if hn is None:
+                                at_elem = host_elem.find(
+                                    f"{nsp}addressingFormatType"
+                                )
+                                idx = (
+                                    list(host_elem).index(at_elem) + 1
+                                    if at_elem is not None
+                                    else 0
+                                )
+                                hn = ET.Element(f"{nsp}hostName")
+                                host_elem.insert(idx, hn)
+                            hn.text = ip_or_host
+                            _set(host_elem, "ipAddress", "0.0.0.0")
+
                         # Ensure SubscribeEvent / eventMode is present
                         sub = host_elem.find(f"{nsp}SubscribeEvent")
                         if sub is None:
