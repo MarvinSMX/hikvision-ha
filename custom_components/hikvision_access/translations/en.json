@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Hikvision Access Controller",
+        "description": "Enter the device connection details.",
+        "data": {
+          "host": "Host (IP or hostname)",
+          "username": "Username",
+          "password": "Password",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      },
+      "confirm": {
+        "title": "Confirm device name",
+        "description": "Name detected automatically from the device: **{detected_name}**\nYou can change it here.",
+        "data": {
+          "name": "Display name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the device. Check host and network.",
+      "invalid_auth": "Authentication failed. Wrong username or password.",
+      "ssl_error": "SSL error. Disable 'Verify SSL' or check the certificate.",
+      "timeout": "Connection timed out. Is the device reachable?",
+      "unknown": "Unknown error. Check the logs."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_event": {
+        "name": "Last Event"
+      },
+      "last_event_time": {
+        "name": "Last Event Time"
+      },
+      "stream_status": {
+        "name": "Stream Status",
+        "state": {
+          "connected": "Connected",
+          "disconnected": "Disconnected",
+          "reconnecting": "Reconnecting"
+        }
+      }
+    },
+    "binary_sensor": {
+      "last_event_active": {
+        "name": "Event Active"
+      }
+    }
+  }
+}

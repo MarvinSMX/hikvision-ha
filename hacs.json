@@ -1,0 +1,9 @@
+{
+  "name": "Hikvision Access Control",
+  "domain": "hikvision_access",
+  "documentation": "https://github.com/yourusername/hikvision-ha",
+  "issue_tracker": "https://github.com/yourusername/hikvision-ha/issues",
+  "homeassistant": "2023.1.0",
+  "codeowners": [],
+  "render_readme": true
+}

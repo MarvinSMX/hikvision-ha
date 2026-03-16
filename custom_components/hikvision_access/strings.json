@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hikvision Access Controller einrichten",
+        "description": "Verbindungsdaten des Gerätes eingeben.",
+        "data": {
+          "host": "Host (IP oder Hostname)",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "verify_ssl": "SSL-Zertifikat verifizieren"
+        }
+      },
+      "confirm": {
+        "title": "Gerätename bestätigen",
+        "description": "Der Name wurde automatisch vom Gerät ermittelt: **{detected_name}**\nDu kannst ihn hier anpassen.",
+        "data": {
+          "name": "Anzeigename"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum Gerät fehlgeschlagen. Host und Port prüfen.",
+      "invalid_auth": "Authentifizierung fehlgeschlagen. Benutzername oder Passwort falsch.",
+      "ssl_error": "SSL-Fehler. 'SSL verifizieren' deaktivieren oder Zertifikat prüfen.",
+      "timeout": "Zeitüberschreitung beim Verbinden. Gerät erreichbar?",
+      "unknown": "Unbekannter Fehler. Logs prüfen."
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits konfiguriert."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_event": {
+        "name": "Letztes Event"
+      },
+      "last_event_time": {
+        "name": "Zeit des letzten Events"
+      },
+      "stream_status": {
+        "name": "Stream-Status",
+        "state": {
+          "connected": "Verbunden",
+          "disconnected": "Getrennt",
+          "reconnecting": "Verbinde..."
+        }
+      }
+    },
+    "binary_sensor": {
+      "last_event_active": {
+        "name": "Event Aktiv"
+      }
+    }
+  }
+}
