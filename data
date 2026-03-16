@@ -1,4 +1,4 @@
-PS C:\Users\M.Laenger> curl.exe -v -k --digest -u "admin:Lm9IS3Q7s]66jTHX" https://10.69.100.207/ISAPI/Event/notification/alertStream
+PS C:\Users\M.Laenger> curl.exe -v -k --digest -u "admin:....." https://10.69.100.207/ISAPI/Event/notification/alertStream
 *   Trying 10.69.100.207:443...
 * schannel: disabled automatic use of client certificate
 * schannel: using IP address, SNI is not supported by OS.
