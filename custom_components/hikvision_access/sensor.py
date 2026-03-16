@@ -10,7 +10,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import ACCESS_STATUS_DENIED, ACCESS_STATUS_GRANTED, DOMAIN
-from .coordinator import HikvisionAcsPoller
+from .coordinator import HikvisionCoordinator
 
 
 async def async_setup_entry(
@@ -19,7 +19,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Hikvision sensors from a config entry."""
-    coordinator: HikvisionAcsPoller = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HikvisionCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     async_add_entities(
         [
@@ -40,7 +40,7 @@ class _HikvisionBaseSensor(SensorEntity):
 
     def __init__(
         self,
-        coordinator: HikvisionAcsPoller,
+        coordinator: HikvisionCoordinator,
         entry: ConfigEntry,
     ) -> None:
         self._coordinator = coordinator
@@ -74,7 +74,7 @@ class HikvisionLastEventSensor(_HikvisionBaseSensor):
     _attr_icon = "mdi:door-open"
     _attr_translation_key = "last_event"
 
-    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_event"
 
@@ -108,7 +108,7 @@ class HikvisionLastEventTimeSensor(_HikvisionBaseSensor):
     _attr_icon = "mdi:clock-outline"
     _attr_translation_key = "last_event_time"
 
-    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_event_time"
 
@@ -125,7 +125,7 @@ class HikvisionLastPersonSensor(_HikvisionBaseSensor):
     _attr_icon = "mdi:account-check"
     _attr_translation_key = "last_person"
 
-    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_person"
 
@@ -159,7 +159,7 @@ class HikvisionAccessStatusSensor(_HikvisionBaseSensor):
 
     _attr_translation_key = "access_status"
 
-    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_access_status"
 
@@ -195,7 +195,7 @@ class HikvisionStreamStatusSensor(_HikvisionBaseSensor):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "stream_status"
 
-    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_stream_status"
 

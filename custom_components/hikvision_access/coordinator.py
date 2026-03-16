@@ -1,61 +1,64 @@
-"""AcsEvent polling coordinator for Hikvision Access Control.
+"""Push-based coordinator for Hikvision Access Control.
 
-Replaces the old alertStream approach with a clean, serial-ordered poll of
-/ISAPI/AccessControl/AcsEvent.  Benefits over alertStream:
-- Only major=5 access events (no system noise)
-- Events arrive in serial order → no dedup / debounce needed
-- beginSerialNo parameter → only new events since last poll
-- inductiveEventType field → semantic labels without reverse-engineering minor codes
-- last_serial persisted in HA storage → survives restarts
+Architecture
+------------
+The Hikvision device is configured once (via PUT /ISAPI/Event/notification/httpHosts)
+to POST every access event to a Home Assistant webhook URL.  No polling loop is
+needed — events arrive in real-time as HTTP POST requests from the device.
+
+Each incoming POST carries a multipart/form-data body (identical in structure
+to the alertStream) with one AccessControllerEvent JSON payload per part.
+
+The coordinator:
+  1. Receives the webhook POST (async_handle_webhook)
+  2. Parses the multipart body → list of event dicts
+  3. Updates internal state (last event, door, access status, …)
+  4. Fires a hikvision_access_event on the HA event bus
+  5. Notifies entity listeners so they can update their state
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import contextlib
+import json
 import logging
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from requests.auth import HTTPDigestAuth
+from aiohttp.web import Request, Response
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.storage import Store
 
 from .const import (
-    ACS_EVENT_PATH,
     ACCESS_DENIED_CODES,
     ACCESS_GRANTED_CODES,
     ACCESS_STATUS_DENIED,
     ACCESS_STATUS_GRANTED,
-    BINARY_SENSOR_ACTIVE_SECONDS,
     CONF_HOST,
     CONF_NAME,
     CONF_PASSWORD,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
+    DOOR_CLOSE_CODES,
+    DOOR_OPEN_CODES,
     EVENT_LABELS,
     EVENT_TYPE,
-    INDUCTIVE_DENIED,
-    INDUCTIVE_DOOR_CLOSE,
-    INDUCTIVE_DOOR_OPEN,
-    INDUCTIVE_EVENT_LABELS,
-    INDUCTIVE_GRANTED,
-    POLL_INTERVAL,
-    STORAGE_VERSION,
+    HTTP_HOSTS_PATH,
     STREAM_STATUS_CONNECTED,
     STREAM_STATUS_DISCONNECTED,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# On first startup (no saved serial), skip events older than this threshold
-# to avoid replaying the device's entire historical log.
-_FIRST_STARTUP_LOOKBACK_SECONDS = 60
+_ISAPI_NS = "http://www.isapi.org/ver20/XMLSchema"
+# Slot used when writing to httpHosts — slot 1 is the first notification host.
+_HTTP_HOST_SLOT = 1
 
 
-class HikvisionAcsPoller:
-    """Polls /ISAPI/AccessControl/AcsEvent and dispatches events to HA."""
+class HikvisionCoordinator:
+    """Manages state and event dispatch for a single Hikvision device."""
 
     def __init__(self, hass: HomeAssistant, config: dict) -> None:
         self.hass = hass
@@ -65,13 +68,7 @@ class HikvisionAcsPoller:
         self._verify_ssl: bool = config.get(CONF_VERIFY_SSL, False)
         self.name: str = config.get(CONF_NAME, self._host)
 
-        self._url = f"https://{self._host}{ACS_EVENT_PATH}?format=json"
-        self._store = Store(hass, STORAGE_VERSION, f"hikvision_access.{self._host}")
-        self._last_serial: int = 0
-        self._cutoff: datetime | None = None  # freshness gate for first startup
-        self._unsub_poll: Any = None
-
-        # Public state — read by entities
+        # Public state — read by sensor / binary_sensor entities
         self.last_event: dict[str, Any] | None = None
         self.last_person_event: dict[str, Any] | None = None
         self.door_is_open: bool | None = None
@@ -81,225 +78,216 @@ class HikvisionAcsPoller:
         self._listeners: list[Callable] = []
 
     # ------------------------------------------------------------------
-    # Lifecycle
+    # Lifecycle (trivial for push — no polling timer to manage)
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Load persisted serial, set freshness gate, start periodic poll."""
-        saved = await self._store.async_load()
-        self._last_serial = (saved or {}).get("last_serial", 0)
-
-        if self._last_serial == 0:
-            # No saved position → first startup.
-            # Apply freshness filter so the device's historical log is not
-            # replayed into HA sensors and automations.
-            self._cutoff = datetime.now(timezone.utc) - timedelta(
-                seconds=_FIRST_STARTUP_LOOKBACK_SECONDS
-            )
-            _LOGGER.info(
-                "Hikvision [%s]: first startup, events older than %s will be skipped",
-                self._host,
-                self._cutoff.isoformat(),
-            )
-        else:
-            _LOGGER.info(
-                "Hikvision [%s]: resuming from serial %d",
-                self._host,
-                self._last_serial,
-            )
-
-        # Immediate first poll (don't wait for the first interval tick)
-        self.hass.async_create_task(self._async_poll())
-
-        # Periodic poll
-        self._unsub_poll = async_track_time_interval(
-            self.hass,
-            self._async_poll,
-            timedelta(seconds=POLL_INTERVAL),
-        )
+        """Called after entities are set up; nothing to start for push."""
 
     async def stop(self) -> None:
-        """Cancel poll timer and persist last serial."""
-        if self._unsub_poll:
-            self._unsub_poll()
-            self._unsub_poll = None
-        await self._store.async_save({"last_serial": self._last_serial})
-        _LOGGER.debug("Hikvision [%s]: saved last_serial=%d", self._host, self._last_serial)
+        """Called on unload; nothing to tear down for push."""
 
     def add_listener(self, callback: Callable) -> Callable:
         """Register a state-change listener. Returns an unsubscribe callable."""
         self._listeners.append(callback)
 
         def _remove() -> None:
-            self._listeners.remove(callback)
+            with contextlib.suppress(ValueError):
+                self._listeners.remove(callback)
 
         return _remove
 
     # ------------------------------------------------------------------
-    # Polling
+    # Webhook handler — called by HA for every incoming device POST
     # ------------------------------------------------------------------
 
-    async def _async_poll(self, _now: Any = None) -> None:
-        """Fetch new events from the device (runs in HA event loop)."""
+    async def async_handle_webhook(
+        self, hass: HomeAssistant, webhook_id: str, request: Request
+    ) -> Response:
+        """Receive a push notification from the device."""
         try:
-            events: list[dict] = await self.hass.async_add_executor_job(
-                self._fetch_events, self._last_serial + 1
-            )
+            body = await request.read()
+            content_type = request.headers.get("Content-Type", "")
+            events = self._parse_push_body(body, content_type)
+            for event in events:
+                self._dispatch_event(event)
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("Hikvision [%s]: poll failed: %s", self._host, exc)
-            self._set_status(STREAM_STATUS_DISCONNECTED)
-            return
+            _LOGGER.warning("Hikvision webhook handler error: %s", exc)
 
-        self._set_status(STREAM_STATUS_CONNECTED)
+        return Response(status=200)
 
-        for event in events:
-            self._dispatch_event(event)
+    # ------------------------------------------------------------------
+    # Device configuration — called once from __init__.py on setup
+    # ------------------------------------------------------------------
 
-        # After first successful poll, lift the freshness gate so that
-        # events from the last minute of offline time are processed normally.
-        if self._cutoff is not None:
-            self._cutoff = None
+    def configure_device(self, ha_url: str, webhook_id: str) -> None:
+        """PUT the HA webhook URL into the device's httpHosts slot 1.
 
-    def _fetch_events(self, begin_serial: int) -> list[dict]:
-        """Runs in executor thread. Returns parsed event list."""
-        xml_body = self._build_query(begin_serial)
-        resp = requests.post(
-            self._url,
-            data=xml_body.encode("utf-8"),
-            auth=HTTPDigestAuth(self._username, self._password),
-            headers={"Content-Type": "application/xml"},
-            verify=self._verify_ssl,
-            timeout=10,
+        Runs in the executor thread (blocking requests call).
+        """
+        parsed = urlparse(ha_url)
+        ip_or_host = parsed.hostname or self._host
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        protocol = "HTTPS" if parsed.scheme == "https" else "HTTP"
+        webhook_path = f"/api/webhook/{webhook_id}"
+
+        xml_body = (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<HttpHostList version="2.0" xmlns="{_ISAPI_NS}">'
+            f"<HttpHost>"
+            f"<id>{_HTTP_HOST_SLOT}</id>"
+            f"<protocolType>{protocol}</protocolType>"
+            f"<parameterFormatType>XML</parameterFormatType>"
+            f"<addressingFormatType>ipaddress</addressingFormatType>"
+            f"<ipAddress>{ip_or_host}</ipAddress>"
+            f"<portNo>{port}</portNo>"
+            f"<url>{webhook_path}</url>"
+            f"<heartbeatInterval>0</heartbeatInterval>"
+            f"<heartbeatTimes>0</heartbeatTimes>"
+            f"</HttpHost>"
+            f"</HttpHostList>"
         )
-        resp.raise_for_status()
-        return self._parse_response(resp.json())
+
+        url = f"https://{self._host}{HTTP_HOSTS_PATH}"
+        try:
+            resp = requests.put(
+                url,
+                data=xml_body.encode("utf-8"),
+                auth=HTTPDigestAuth(self._username, self._password),
+                headers={"Content-Type": "application/xml"},
+                verify=self._verify_ssl,
+                timeout=10,
+            )
+            if resp.status_code in (200, 201):
+                _LOGGER.info(
+                    "Hikvision [%s]: configured push to %s%s",
+                    self._host,
+                    ha_url,
+                    webhook_path,
+                )
+                self._set_status(STREAM_STATUS_CONNECTED)
+            else:
+                _LOGGER.warning(
+                    "Hikvision [%s]: httpHosts PUT returned HTTP %d — "
+                    "events may not arrive. Body: %s",
+                    self._host,
+                    resp.status_code,
+                    resp.text[:200],
+                )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning(
+                "Hikvision [%s]: could not configure device push: %s",
+                self._host,
+                exc,
+            )
 
     # ------------------------------------------------------------------
-    # Query builder
+    # Multipart / JSON body parsing
     # ------------------------------------------------------------------
+
+    def _parse_push_body(self, body: bytes, content_type: str) -> list[dict]:
+        """Parse the raw POST body into a list of AccessControllerEvent dicts.
+
+        The device POSTs multipart/form-data (same structure as alertStream).
+        Each MIME part that contains an AccessControllerEvent is extracted.
+        Falls back to direct JSON if the body is not multipart.
+        """
+        text = body.decode("utf-8", errors="ignore")
+
+        # Determine MIME boundary (prefer value from Content-Type header)
+        boundary = "--MIME_boundary"
+        if "boundary=" in content_type:
+            boundary_name = content_type.split("boundary=")[-1].strip().strip('"')
+            boundary = f"--{boundary_name}"
+
+        if boundary.lstrip("--") in text:
+            return self._parse_multipart(text, boundary)
+
+        # Fallback: plain JSON body
+        try:
+            payload = json.loads(text)
+            if "AccessControllerEvent" in payload:
+                return [payload]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        return []
 
     @staticmethod
-    def _build_query(begin_serial: int) -> str:
-        """Build the AcsEventCond XML body."""
-        return (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<AcsEventCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">'
-            "<searchID>1</searchID>"
-            "<major>5</major>"
-            f"<beginSerialNo>{begin_serial}</beginSerialNo>"
-            "<endSerialNo>3000000000</endSerialNo>"
-            "</AcsEventCond>"
-        )
-
-    # ------------------------------------------------------------------
-    # Response parsing
-    # ------------------------------------------------------------------
-
-    def _parse_response(self, data: dict) -> list[dict]:
-        """Extract events from the AcsEvent JSON response.
-
-        Always advances self._last_serial, but only returns events that
-        pass the freshness gate (relevant on first startup only).
-        """
-        acs = data.get("AcsEvent", {})
-
-        if acs.get("responseStatusStrg") == "NO MATCH":
-            return []
-
-        items: list[dict] = acs.get("InfoList") or []
-        result: list[dict] = []
-
-        for item in items:
-            serial = item.get("serialNo", 0)
-            if serial > self._last_serial:
-                self._last_serial = serial
-
-            if not self._is_fresh(item):
-                _LOGGER.debug(
-                    "Skipping historical event serial=%d ts=%s",
-                    serial,
-                    item.get("time"),
-                )
+    def _parse_multipart(text: str, boundary: str) -> list[dict]:
+        """Split a multipart body on the given boundary and extract JSON parts."""
+        results: list[dict] = []
+        parts = text.split(boundary)
+        for part in parts:
+            part = part.strip().lstrip("-").strip()
+            if not part:
                 continue
+            separator = "\r\n\r\n" if "\r\n\r\n" in part else "\n\n"
+            if separator not in part:
+                continue
+            _, body_part = part.split(separator, 1)
+            body_part = body_part.strip()
+            if not body_part.startswith("{"):
+                continue
+            try:
+                payload = json.loads(body_part)
+                if "AccessControllerEvent" in payload:
+                    results.append(payload)
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return results
 
-            result.append(self._build_event(item))
+    # ------------------------------------------------------------------
+    # Event building
+    # ------------------------------------------------------------------
 
-        return result
-
-    def _is_fresh(self, item: dict) -> bool:
-        """Return False for events older than the first-startup cutoff."""
-        if self._cutoff is None:
-            return True
-        timestamp_str = item.get("time", "")
-        try:
-            event_time = datetime.fromisoformat(timestamp_str)
-            if event_time.tzinfo is None:
-                event_time = event_time.replace(tzinfo=timezone.utc)
-            return event_time >= self._cutoff
-        except (ValueError, TypeError):
-            return True  # can't parse → let through
-
-    def _build_event(self, item: dict) -> dict[str, Any]:
-        """Flatten an AcsEvent InfoList item into a clean event dict."""
-        major = item.get("major", 0)
-        minor = item.get("minor", 0)
+    def _build_event(self, payload: dict) -> dict[str, Any]:
+        """Flatten an alertStream/push AccessControllerEvent payload."""
+        ace = payload.get("AccessControllerEvent", {})
+        major = ace.get("majorEventType", 0)
+        minor = ace.get("subEventType", 0)
         event_code = f"{major}_{minor}"
-        inductive = item.get("inductiveEventType")
-
-        # inductiveEventType gives semantic meaning directly; fall back to
-        # the minor-code map for devices that don't send it.
-        if inductive:
-            label = INDUCTIVE_EVENT_LABELS.get(inductive, f"Typ {inductive}")
-        else:
-            label = EVENT_LABELS.get(event_code, event_code)
+        label = EVENT_LABELS.get(event_code, event_code)
 
         return {
-            "device_name": self.name,
-            "ip": self._host,
-            "timestamp": item.get("time"),
+            "device_name": ace.get("deviceName", self.name),
+            "ip": payload.get("ipAddress", self._host),
+            "timestamp": payload.get("dateTime"),
             "major": major,
             "minor": minor,
             "event_code": event_code,
             "event_label": label,
-            "inductive_type": inductive,
-            "person_name": item.get("name"),
-            "card_no": item.get("cardNo"),
-            "employee_no": item.get("employeeNoString"),
-            "serial_no": item.get("serialNo"),
-            # Alias kept for backward compatibility with existing automations
-            "verify_no": item.get("serialNo"),
+            "inductive_type": None,
+            "person_name": ace.get("name") or ace.get("employeeName"),
+            "card_no": ace.get("cardNo"),
+            "employee_no": ace.get("employeeNoString") or ace.get("employeeNo"),
+            "serial_no": ace.get("serialNo"),
+            "verify_no": ace.get("verifyNo"),
         }
 
     # ------------------------------------------------------------------
-    # Dispatching
+    # State dispatch
     # ------------------------------------------------------------------
 
-    def _dispatch_event(self, event: dict) -> None:
-        """Update coordinator state and notify entities + event bus."""
-        inductive = event.get("inductive_type")
-        event_code = event.get("event_code", "")
+    def _dispatch_event(self, payload: dict) -> None:
+        """Update state from an alertStream payload dict and notify listeners."""
+        event = self._build_event(payload)
+        event_code = event["event_code"]
 
-        # Semantic classification via inductiveEventType (preferred)
-        if inductive in INDUCTIVE_GRANTED:
-            self.last_access_status = ACCESS_STATUS_GRANTED
-            if event.get("person_name"):
-                self.last_person_event = event
-        elif inductive in INDUCTIVE_DENIED:
-            self.last_access_status = ACCESS_STATUS_DENIED
-        elif inductive in INDUCTIVE_DOOR_OPEN:
-            self.door_is_open = True
-        elif inductive in INDUCTIVE_DOOR_CLOSE:
-            self.door_is_open = False
-        # Fallback: minor-code classification
-        elif event_code in ACCESS_GRANTED_CODES:
+        if event_code in ACCESS_GRANTED_CODES:
             self.last_access_status = ACCESS_STATUS_GRANTED
             if event.get("person_name"):
                 self.last_person_event = event
         elif event_code in ACCESS_DENIED_CODES:
             self.last_access_status = ACCESS_STATUS_DENIED
+        elif event_code in DOOR_OPEN_CODES:
+            self.door_is_open = True
+        elif event_code in DOOR_CLOSE_CODES:
+            self.door_is_open = False
 
         self.last_event = event
         self.hass.bus.async_fire(EVENT_TYPE, event)
+        self._set_status(STREAM_STATUS_CONNECTED)
         self._notify_listeners()
 
     # ------------------------------------------------------------------
@@ -317,3 +305,5 @@ class HikvisionAcsPoller:
                 listener()
             except Exception:  # noqa: BLE001
                 pass
+
+

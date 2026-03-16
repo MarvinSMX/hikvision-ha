@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import BINARY_SENSOR_ACTIVE_SECONDS, DOMAIN
-from .coordinator import HikvisionAcsPoller
+from .coordinator import HikvisionCoordinator
 
 
 async def async_setup_entry(
@@ -24,7 +24,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Hikvision binary sensors from a config entry."""
-    coordinator: HikvisionAcsPoller = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HikvisionCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
             HikvisionLastEventActiveSensor(coordinator, entry),
@@ -33,7 +33,7 @@ async def async_setup_entry(
     )
 
 
-def _device_info(coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> dict:
+def _device_info(coordinator: HikvisionCoordinator, entry: ConfigEntry) -> dict:
     return {
         "identifiers": {(DOMAIN, entry.entry_id)},
         "name": coordinator.name,
@@ -57,7 +57,7 @@ class HikvisionLastEventActiveSensor(BinarySensorEntity):
     _attr_icon = "mdi:motion-sensor"
     _attr_translation_key = "last_event_active"
 
-    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_last_event_active"
@@ -116,7 +116,7 @@ class HikvisionDoorSensor(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.DOOR
     _attr_translation_key = "door"
 
-    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_door"
