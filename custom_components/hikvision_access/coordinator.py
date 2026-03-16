@@ -121,15 +121,17 @@ class HikvisionCoordinator:
     # ------------------------------------------------------------------
 
     def configure_device(self, ha_url: str, webhook_id: str) -> None:
-        """PUT the HA webhook URL into the device's httpHosts slot 1.
+        """Configure the device to push events to the HA webhook.
 
-        Mirrors the device's own GET response structure exactly so the PUT is
-        accepted.  Both slots are included in the body (device requires the
-        full list).  Slot 2 is left zeroed / empty.
+        Strategy: GET the current httpHosts XML → modify only the target
+        fields in slot 1 → PUT the modified XML back.  This guarantees the
+        structure is byte-for-byte acceptable to the device regardless of
+        firmware differences in element names or ordering.
 
         Runs in the executor thread (blocking requests call).
         """
         import warnings  # noqa: PLC0415
+        import xml.etree.ElementTree as ET  # noqa: PLC0415
 
         parsed = urlparse(ha_url)
         ip_or_host = parsed.hostname or self._host
@@ -137,78 +139,114 @@ class HikvisionCoordinator:
         protocol = "HTTPS" if parsed.scheme == "https" else "HTTP"
         webhook_path = f"/api/webhook/{webhook_id}"
 
-        # Build a body that mirrors the GET response from the device.
-        # Key points:
-        #   - parameterFormatType left EMPTY (device rejects "JSON")
-        #   - Both slots are included so the device accepts the PUT
-        #   - SubscribeEvent / eventMode=all ensures all access events are sent
-        xml_body = (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            f'<HttpHostNotificationList version="2.0" xmlns="{_ISAPI_NS}">'
-            # --- slot 1: our webhook ---
-            "<HttpHostNotification>"
-            f"<id>{_HTTP_HOST_SLOT}</id>"
-            f"<url>{webhook_path}</url>"
-            f"<protocolType>{protocol}</protocolType>"
-            "<parameterFormatType></parameterFormatType>"
-            "<addressingFormatType>ipaddress</addressingFormatType>"
-            f"<ipAddress>{ip_or_host}</ipAddress>"
-            f"<portNo>{port}</portNo>"
-            "<httpAuthenticationMethod>none</httpAuthenticationMethod>"
-            "<SubscribeEvent>"
-            "<heartbeat>30</heartbeat>"
-            "<eventMode>all</eventMode>"
-            "</SubscribeEvent>"
-            "</HttpHostNotification>"
-            # --- slot 2: left empty / zeroed ---
-            "<HttpHostNotification>"
-            "<id>2</id>"
-            "<url></url>"
-            "<protocolType>HTTP</protocolType>"
-            "<parameterFormatType></parameterFormatType>"
-            "<addressingFormatType>ipaddress</addressingFormatType>"
-            "<ipAddress>0.0.0.0</ipAddress>"
-            "<portNo>0</portNo>"
-            "<httpAuthenticationMethod>none</httpAuthenticationMethod>"
-            "</HttpHostNotification>"
-            "</HttpHostNotificationList>"
-        )
+        base_url = f"https://{self._host}{HTTP_HOSTS_PATH}"
+        auth = HTTPDigestAuth(self._username, self._password)
 
-        url = f"https://{self._host}{HTTP_HOSTS_PATH}"
-        try:
-            # Suppress InsecureRequestWarning for intentional verify=False
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+
+            # ── 1. GET current config ─────────────────────────────────────
+            try:
+                get_resp = requests.get(
+                    base_url, auth=auth, verify=self._verify_ssl, timeout=10
+                )
+                get_resp.raise_for_status()
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Hikvision [%s]: GET httpHosts failed: %s", self._host, exc
+                )
+                return
+
+            # ── 2. Parse XML and update slot 1 ────────────────────────────
+            try:
+                raw_xml = get_resp.text
+                root = ET.fromstring(raw_xml)
+
+                # Detect namespace from root element tag and register it
+                # as the default so ET serialises without namespace prefixes.
+                ns = ""
+                if root.tag.startswith("{"):
+                    ns = root.tag.split("}")[0][1:]
+                    ET.register_namespace("", ns)
+                nsp = f"{{{ns}}}" if ns else ""
+
+                def _set(parent: ET.Element, tag: str, value: str) -> None:
+                    elem = parent.find(f"{nsp}{tag}")
+                    if elem is not None:
+                        elem.text = value
+
+                found = False
+                for host_elem in root.findall(f"{nsp}HttpHostNotification"):
+                    id_elem = host_elem.find(f"{nsp}id")
+                    if id_elem is not None and id_elem.text == str(_HTTP_HOST_SLOT):
+                        _set(host_elem, "url", webhook_path)
+                        _set(host_elem, "ipAddress", ip_or_host)
+                        _set(host_elem, "portNo", str(port))
+                        _set(host_elem, "protocolType", protocol)
+                        # Ensure SubscribeEvent / eventMode is present
+                        sub = host_elem.find(f"{nsp}SubscribeEvent")
+                        if sub is None:
+                            sub = ET.SubElement(host_elem, f"{nsp}SubscribeEvent")
+                        em = sub.find(f"{nsp}eventMode")
+                        if em is None:
+                            em = ET.SubElement(sub, f"{nsp}eventMode")
+                        em.text = "all"
+                        found = True
+                        break
+
+                if not found:
+                    _LOGGER.warning(
+                        "Hikvision [%s]: httpHosts slot %d not found in device response",
+                        self._host,
+                        _HTTP_HOST_SLOT,
+                    )
+                    return
+
+                # Prepend the XML declaration that ET.tostring omits by default
+                modified_xml = (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    + ET.tostring(root, encoding="unicode")
+                )
+
+            except ET.ParseError as exc:
+                _LOGGER.warning(
+                    "Hikvision [%s]: could not parse httpHosts XML: %s",
+                    self._host,
+                    exc,
+                )
+                return
+
+            # ── 3. PUT modified config ────────────────────────────────────
+            try:
                 resp = requests.put(
-                    url,
-                    data=xml_body.encode("utf-8"),
-                    auth=HTTPDigestAuth(self._username, self._password),
+                    base_url,
+                    data=modified_xml.encode("utf-8"),
+                    auth=auth,
                     headers={"Content-Type": "application/xml"},
                     verify=self._verify_ssl,
                     timeout=10,
                 )
-            if resp.status_code in (200, 201):
-                _LOGGER.info(
-                    "Hikvision [%s]: push configured → %s%s",
-                    self._host,
-                    ha_url,
-                    webhook_path,
-                )
-                self._set_status(STREAM_STATUS_CONNECTED)
-            else:
+                if resp.status_code in (200, 201):
+                    _LOGGER.info(
+                        "Hikvision [%s]: push configured → %s%s",
+                        self._host,
+                        ha_url,
+                        webhook_path,
+                    )
+                    self._set_status(STREAM_STATUS_CONNECTED)
+                else:
+                    _LOGGER.warning(
+                        "Hikvision [%s]: httpHosts PUT returned HTTP %d. Body: %s",
+                        self._host,
+                        resp.status_code,
+                        resp.text[:400],
+                    )
+            except Exception as exc:  # noqa: BLE001
                 _LOGGER.warning(
-                    "Hikvision [%s]: httpHosts PUT returned HTTP %d — "
-                    "events may not arrive. Body: %s",
+                    "Hikvision [%s]: httpHosts PUT request failed: %s",
                     self._host,
-                    resp.status_code,
-                    resp.text[:300],
+                    exc,
                 )
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning(
-                "Hikvision [%s]: could not configure device push: %s",
-                self._host,
-                exc,
-            )
 
     # ------------------------------------------------------------------
     # Multipart / JSON body parsing
