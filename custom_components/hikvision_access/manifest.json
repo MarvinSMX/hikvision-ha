@@ -5,8 +5,8 @@
   "config_flow": true,
   "documentation": "https://github.com/yourusername/hikvision-ha",
   "issue_tracker": "https://github.com/yourusername/hikvision-ha/issues",
-  "requirements": [],
+  "requirements": ["python-debouncer>=0.1.5"],
   "dependencies": [],
   "codeowners": [],
-  "iot_class": "local_push"
+  "iot_class": "local_polling"
 }

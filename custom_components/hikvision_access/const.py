@@ -11,23 +11,51 @@ CONF_PASSWORD = "password"
 CONF_VERIFY_SSL = "verify_ssl"
 CONF_NAME = "name"
 
-STREAM_PATH = "/ISAPI/Event/notification/alertStream"
+# API endpoints
+ACS_EVENT_PATH = "/ISAPI/AccessControl/AcsEvent"
+DEVICE_INFO_PATH = "/ISAPI/System/deviceInfo"
+ACS_CAPS_PATH = "/ISAPI/AccessControl/GetAcsEvent/capabilities"
 
-RECONNECT_DELAY = 5
+# Polling
+POLL_INTERVAL = 3  # seconds between AcsEvent polls
+
+# HA storage
+STORAGE_VERSION = 1
+
+# Binary sensor pulse duration
 BINARY_SENSOR_ACTIVE_SECONDS = 3
 
+# Stream / poll status labels (used by diagnostic sensor)
 STREAM_STATUS_CONNECTED = "connected"
 STREAM_STATUS_DISCONNECTED = "disconnected"
-STREAM_STATUS_RECONNECTING = "reconnecting"
 
-# AccessControllerEvent sub-types observed on DS-K1T671
-ACE_SUB_PERSON_VERIFIED = 75
-ACE_SUB_DOOR_CLOSED = 21
-ACE_SUB_DOOR_OPEN = 22
-ACE_MAJOR_ACCESS = 5
+# Access outcome labels
+ACCESS_STATUS_GRANTED = "granted"
+ACCESS_STATUS_DENIED = "denied"
 
-# Human-readable labels for known event codes (major_sub).
-# Extend this dict as you discover new codes on your device.
+# inductiveEventType values (Hikvision semantic classification)
+# Much more reliable than raw major/minor code mapping.
+INDUCTIVE_EVENT_LABELS: dict[int, str] = {
+    1: "Zugang gewährt",
+    2: "Zugang verweigert",
+    3: "Tür geöffnet",
+    4: "Tür geschlossen",
+    5: "Tür Ausnahme",
+    6: "Fernöffnung",
+    8: "Gerät Ausnahme",
+    9: "Gerät wiederhergestellt",
+    10: "Alarm",
+    11: "Alarm beendet",
+    12: "Intercom",
+}
+
+INDUCTIVE_GRANTED: frozenset[int] = frozenset({1})
+INDUCTIVE_DENIED: frozenset[int] = frozenset({2})
+INDUCTIVE_DOOR_OPEN: frozenset[int] = frozenset({3})
+INDUCTIVE_DOOR_CLOSE: frozenset[int] = frozenset({4})
+
+# Fallback labels for devices that don't supply inductiveEventType.
+# Keys are "major_minor" in decimal (as returned by the JSON API).
 EVENT_LABELS: dict[str, str] = {
     "5_75": "Zugang gewährt",
     "5_22": "Tür geöffnet",
@@ -38,9 +66,6 @@ EVENT_LABELS: dict[str, str] = {
     "2_1031": "Zugang verweigert",
 }
 
-# Event codes that map to an access outcome (sensor.access_status)
+# Event codes that map to access outcomes (fallback if no inductiveEventType)
 ACCESS_GRANTED_CODES: frozenset[str] = frozenset({"5_75"})
 ACCESS_DENIED_CODES: frozenset[str] = frozenset({"2_1031"})
-
-ACCESS_STATUS_GRANTED = "granted"
-ACCESS_STATUS_DENIED = "denied"

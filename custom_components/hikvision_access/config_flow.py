@@ -1,9 +1,9 @@
 """Config flow for Hikvision Access Control."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
+import xml.etree.ElementTree as ET
 
 import requests
 from requests.auth import HTTPDigestAuth
@@ -19,13 +19,14 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    ACS_CAPS_PATH,
     CONF_HOST,
     CONF_NAME,
     CONF_PASSWORD,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
+    DEVICE_INFO_PATH,
     DOMAIN,
-    STREAM_PATH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,88 +42,66 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
+_ISAPI_NS = "http://www.isapi.org/ver20/XMLSchema"
+
 
 def _connect_and_detect(
     host: str, username: str, password: str, verify_ssl: bool
 ) -> tuple[str | None, str | None]:
-    """Connect to the alertStream, verify auth, and try to read the first deviceName.
+    """Validate credentials and detect the device name.
+
+    1. GET capabilities endpoint → verifies connectivity and auth.
+    2. GET deviceInfo             → extracts the device's configured name.
 
     Returns (error_key_or_None, detected_name_or_None).
-    The read timeout is intentionally short (3 s); devices typically flush
-    buffered events immediately on connect so this almost always succeeds.
     """
-    url = f"https://{host}{STREAM_PATH}"
+    auth = HTTPDigestAuth(username, password)
+
+    # --- Step 1: verify connectivity + auth via capabilities ---
+    caps_url = f"https://{host}{ACS_CAPS_PATH}"
     try:
-        with requests.get(
-            url,
-            auth=HTTPDigestAuth(username, password),
-            stream=True,
+        resp = requests.get(
+            caps_url,
+            auth=auth,
             verify=verify_ssl,
-            timeout=(10, 3),  # connect 10 s, read 3 s
-        ) as resp:
-            if resp.status_code == 401:
-                return "invalid_auth", None
-            if resp.status_code != 200:
-                return "cannot_connect", None
-
-            # Try to read enough data to find the first JSON part
-            buffer = b""
-            for chunk in resp.iter_content(chunk_size=4096):
-                buffer += chunk
-                name = _extract_first_device_name(buffer)
-                if name:
-                    return None, name
-                # Stop after 32 KB – more than enough for several events
-                if len(buffer) > 32768:
-                    break
-
+            timeout=10,
+        )
+        if resp.status_code == 401:
+            return "invalid_auth", None
+        if resp.status_code != 200:
+            return "cannot_connect", None
     except requests.exceptions.SSLError:
         return "ssl_error", None
     except requests.exceptions.ConnectionError:
         return "cannot_connect", None
     except requests.exceptions.Timeout:
-        # Timeout on read means auth was fine but no events arrived yet –
-        # treat as success with no detected name
-        return None, None
+        return "timeout", None
     except Exception:  # noqa: BLE001
         return "unknown", None
 
+    # --- Step 2: fetch device name from System/deviceInfo ---
+    info_url = f"https://{host}{DEVICE_INFO_PATH}"
+    try:
+        resp = requests.get(
+            info_url,
+            auth=auth,
+            verify=verify_ssl,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            root = ET.fromstring(resp.text)
+            # Try with and without namespace
+            for tag in (
+                f"{{{_ISAPI_NS}}}deviceName",
+                "deviceName",
+            ):
+                elem = root.find(tag)
+                if elem is not None and elem.text:
+                    return None, elem.text.strip()
+    except Exception:  # noqa: BLE001
+        pass  # Name detection is best-effort; connection already confirmed
+
     return None, None
-
-
-def _extract_first_device_name(buffer: bytes) -> str | None:
-    """Scan a raw stream buffer for the first AccessControllerEvent.deviceName."""
-    sep = b"--MIME_boundary"
-    start = 0
-    while True:
-        first = buffer.find(sep, start)
-        if first == -1:
-            break
-        second = buffer.find(sep, first + len(sep))
-        if second == -1:
-            break
-
-        part = buffer[first + len(sep) : second].strip()
-
-        # Split headers / body
-        for marker in (b"\r\n\r\n", b"\n\n"):
-            if marker in part:
-                _, body = part.split(marker, 1)
-                body = body.strip()
-                if body.startswith(b"{"):
-                    try:
-                        payload = json.loads(body)
-                        ace = payload.get("AccessControllerEvent", {})
-                        name = ace.get("deviceName", "").strip()
-                        if name:
-                            return name
-                    except json.JSONDecodeError:
-                        pass
-                break
-
-        start = second
-
-    return None
 
 
 async def _async_connect_and_detect(
@@ -167,7 +146,6 @@ class HikvisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if not errors:
                 self._credentials = user_input
-                # Fall back to host if stream had no events within the read window
                 self._detected_name = detected or user_input[CONF_HOST]
                 return await self.async_step_confirm()
 

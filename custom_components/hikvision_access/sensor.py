@@ -10,7 +10,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import ACCESS_STATUS_DENIED, ACCESS_STATUS_GRANTED, DOMAIN
-from .coordinator import HikvisionStreamCoordinator
+from .coordinator import HikvisionAcsPoller
 
 
 async def async_setup_entry(
@@ -19,7 +19,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Hikvision sensors from a config entry."""
-    coordinator: HikvisionStreamCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HikvisionAcsPoller = hass.data[DOMAIN][entry.entry_id]
 
     async_add_entities(
         [
@@ -40,7 +40,7 @@ class _HikvisionBaseSensor(SensorEntity):
 
     def __init__(
         self,
-        coordinator: HikvisionStreamCoordinator,
+        coordinator: HikvisionAcsPoller,
         entry: ConfigEntry,
     ) -> None:
         self._coordinator = coordinator
@@ -74,10 +74,9 @@ class HikvisionLastEventSensor(_HikvisionBaseSensor):
     _attr_icon = "mdi:door-open"
     _attr_translation_key = "last_event"
 
-    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_event"
-        self._attr_name = f"{coordinator.name} Last Event"
 
     @property
     def native_value(self) -> str | None:
@@ -92,16 +91,14 @@ class HikvisionLastEventSensor(_HikvisionBaseSensor):
             return {}
         return {
             "event_code": event.get("event_code"),
+            "inductive_type": event.get("inductive_type"),
             "device_name": event.get("device_name"),
             "ip": event.get("ip"),
             "timestamp": event.get("timestamp"),
             "major": event.get("major"),
-            "sub": event.get("sub"),
+            "minor": event.get("minor"),
             "person_name": event.get("person_name"),
-            "verify_no": event.get("verify_no"),
             "serial_no": event.get("serial_no"),
-            "remote_host": event.get("remote_host"),
-            "event_state": event.get("event_state"),
         }
 
 
@@ -111,10 +108,9 @@ class HikvisionLastEventTimeSensor(_HikvisionBaseSensor):
     _attr_icon = "mdi:clock-outline"
     _attr_translation_key = "last_event_time"
 
-    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_event_time"
-        self._attr_name = f"{coordinator.name} Last Event Time"
 
     @property
     def native_value(self) -> str | None:
@@ -129,10 +125,9 @@ class HikvisionLastPersonSensor(_HikvisionBaseSensor):
     _attr_icon = "mdi:account-check"
     _attr_translation_key = "last_person"
 
-    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_person"
-        self._attr_name = f"{coordinator.name} Last Person"
 
     @property
     def native_value(self) -> str | None:
@@ -149,8 +144,7 @@ class HikvisionLastPersonSensor(_HikvisionBaseSensor):
             "timestamp": event.get("timestamp"),
             "card_no": event.get("card_no"),
             "employee_no": event.get("employee_no"),
-            "verify_mode": event.get("verify_mode"),
-            "verify_no": event.get("verify_no"),
+            "serial_no": event.get("serial_no"),
             "event_code": event.get("event_code"),
         }
 
@@ -165,10 +159,9 @@ class HikvisionAccessStatusSensor(_HikvisionBaseSensor):
 
     _attr_translation_key = "access_status"
 
-    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_access_status"
-        self._attr_name = f"{coordinator.name} Zugang"
 
     @property
     def native_value(self) -> str | None:
@@ -191,21 +184,20 @@ class HikvisionAccessStatusSensor(_HikvisionBaseSensor):
             "person_name": event.get("person_name"),
             "timestamp": event.get("timestamp"),
             "employee_no": event.get("employee_no"),
-            "verify_mode": event.get("verify_mode"),
+            "card_no": event.get("card_no"),
         }
 
 
 class HikvisionStreamStatusSensor(_HikvisionBaseSensor):
-    """Sensor that shows the current stream connection status."""
+    """Sensor that shows the current poll connection status."""
 
     _attr_icon = "mdi:lan-connect"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "stream_status"
 
-    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_stream_status"
-        self._attr_name = f"{coordinator.name} Stream Status"
 
     @property
     def native_value(self) -> str:
@@ -215,6 +207,4 @@ class HikvisionStreamStatusSensor(_HikvisionBaseSensor):
     def icon(self) -> str:
         if self._coordinator.stream_status == "connected":
             return "mdi:lan-connect"
-        if self._coordinator.stream_status == "reconnecting":
-            return "mdi:lan-pending"
         return "mdi:lan-disconnect"

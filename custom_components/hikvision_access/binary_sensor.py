@@ -1,7 +1,10 @@
 """Binary sensor entities for Hikvision Access Control."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any
+
+from debouncer import DebounceOptions, debounce
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -10,10 +13,9 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_call_later
 
 from .const import BINARY_SENSOR_ACTIVE_SECONDS, DOMAIN
-from .coordinator import HikvisionStreamCoordinator
+from .coordinator import HikvisionAcsPoller
 
 
 async def async_setup_entry(
@@ -22,7 +24,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Hikvision binary sensors from a config entry."""
-    coordinator: HikvisionStreamCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: HikvisionAcsPoller = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
             HikvisionLastEventActiveSensor(coordinator, entry),
@@ -31,7 +33,7 @@ async def async_setup_entry(
     )
 
 
-def _device_info(coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> dict:
+def _device_info(coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> dict:
     return {
         "identifiers": {(DOMAIN, entry.entry_id)},
         "name": coordinator.name,
@@ -42,54 +44,63 @@ def _device_info(coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) ->
 
 
 class HikvisionLastEventActiveSensor(BinarySensorEntity):
-    """Pulses ON for a few seconds on every incoming event (any type).
+    """Pulses ON when any event arrives; turns OFF automatically after a quiet period.
 
-    Useful as a general 'something happened at the door' trigger.
+    Uses python-debouncer (trailing debounce) for the auto-reset:
+    the sensor stays ON as long as events keep arriving, and only switches
+    OFF once no new event has been received for BINARY_SENSOR_ACTIVE_SECONDS.
     """
 
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_device_class = BinarySensorDeviceClass.MOTION
     _attr_icon = "mdi:motion-sensor"
+    _attr_translation_key = "last_event_active"
 
-    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_last_event_active"
-        self._attr_name = f"{coordinator.name} Event Active"
         self._attr_is_on = False
-        self._reset_task: Any = None
-        self._unsub: Any = None
         self._attr_device_info = _device_info(coordinator, entry)
+        self._unsub: Any = None
+        # Populated in async_added_to_hass once the event loop is running
+        self._schedule_reset: Any = None
 
     async def async_added_to_hass(self) -> None:
+        """Register listener and create the per-instance debounced reset."""
         self._unsub = self._coordinator.add_listener(self._handle_update)
+
+        # Create a fresh debounced coroutine per entity instance.
+        # trailing=True  → fires AFTER the wait period of quiet
+        # leading=False  → does NOT fire on the first call
+        # Concretely: turns the sensor OFF once no new event arrives for
+        # BINARY_SENSOR_ACTIVE_SECONDS seconds.
+        @debounce(
+            wait=BINARY_SENSOR_ACTIVE_SECONDS,
+            options=DebounceOptions(trailing=True, leading=False),
+        )
+        async def _reset() -> None:
+            self._attr_is_on = False
+            self.async_write_ha_state()
+
+        self._schedule_reset = _reset
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsub:
             self._unsub()
-        if self._reset_task:
-            self._reset_task()
 
     @callback
     def _handle_update(self) -> None:
-        if self._coordinator.last_event is None:
+        if self._coordinator.last_event is None or self._schedule_reset is None:
             return
+        # Turn ON immediately …
         self._attr_is_on = True
         self.async_write_ha_state()
-        if self._reset_task:
-            self._reset_task()
-        self._reset_task = async_call_later(
-            self.hass,
-            BINARY_SENSOR_ACTIVE_SECONDS,
-            self._async_reset,
-        )
-
-    @callback
-    def _async_reset(self, _now: Any = None) -> None:
-        self._attr_is_on = False
-        self._reset_task = None
-        self.async_write_ha_state()
+        # … and (re-)schedule the debounced OFF.
+        # Each new event resets the wait timer, so the sensor stays ON
+        # as long as events keep arriving.
+        asyncio.ensure_future(self._schedule_reset())
 
 
 class HikvisionDoorSensor(BinarySensorEntity):
@@ -103,12 +114,12 @@ class HikvisionDoorSensor(BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_device_class = BinarySensorDeviceClass.DOOR
+    _attr_translation_key = "door"
 
-    def __init__(self, coordinator: HikvisionStreamCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: HikvisionAcsPoller, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_door"
-        self._attr_name = f"{coordinator.name} Tür"
         self._unsub: Any = None
         self._attr_device_info = _device_info(coordinator, entry)
 
