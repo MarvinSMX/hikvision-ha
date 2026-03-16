@@ -131,21 +131,26 @@ class HikvisionCoordinator:
         protocol = "HTTPS" if parsed.scheme == "https" else "HTTP"
         webhook_path = f"/api/webhook/{webhook_id}"
 
+        # The device uses HttpHostNotificationList / HttpHostNotification schema.
+        # We send only slot 1; slot 2 stays untouched (device merges by id).
         xml_body = (
-            f'<?xml version="1.0" encoding="UTF-8"?>'
-            f'<HttpHostList version="2.0" xmlns="{_ISAPI_NS}">'
-            f"<HttpHost>"
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<HttpHostNotificationList version="2.0" xmlns="{_ISAPI_NS}">'
+            "<HttpHostNotification>"
             f"<id>{_HTTP_HOST_SLOT}</id>"
+            f"<url>{webhook_path}</url>"
             f"<protocolType>{protocol}</protocolType>"
-            f"<parameterFormatType>XML</parameterFormatType>"
-            f"<addressingFormatType>ipaddress</addressingFormatType>"
+            "<parameterFormatType>JSON</parameterFormatType>"
+            "<addressingFormatType>ipaddress</addressingFormatType>"
             f"<ipAddress>{ip_or_host}</ipAddress>"
             f"<portNo>{port}</portNo>"
-            f"<url>{webhook_path}</url>"
-            f"<heartbeatInterval>0</heartbeatInterval>"
-            f"<heartbeatTimes>0</heartbeatTimes>"
-            f"</HttpHost>"
-            f"</HttpHostList>"
+            "<httpAuthenticationMethod>none</httpAuthenticationMethod>"
+            "<SubscribeEvent>"
+            "<heartbeat>30</heartbeat>"
+            "<eventMode>all</eventMode>"
+            "</SubscribeEvent>"
+            "</HttpHostNotification>"
+            "</HttpHostNotificationList>"
         )
 
         url = f"https://{self._host}{HTTP_HOSTS_PATH}"
@@ -188,29 +193,37 @@ class HikvisionCoordinator:
     def _parse_push_body(self, body: bytes, content_type: str) -> list[dict]:
         """Parse the raw POST body into a list of AccessControllerEvent dicts.
 
-        The device POSTs multipart/form-data (same structure as alertStream).
-        Each MIME part that contains an AccessControllerEvent is extracted.
-        Falls back to direct JSON if the body is not multipart.
+        Supports two formats the device may send:
+        - multipart/form-data  (same structure as alertStream, parameterFormatType=XML)
+        - application/json     (plain JSON body, parameterFormatType=JSON)
+
+        The boundary name is extracted from the Content-Type header when present;
+        "MIME_boundary" is the well-known Hikvision default.
         """
         text = body.decode("utf-8", errors="ignore")
 
-        # Determine MIME boundary (prefer value from Content-Type header)
+        # --- Try multipart first ---
         boundary = "--MIME_boundary"
         if "boundary=" in content_type:
             boundary_name = content_type.split("boundary=")[-1].strip().strip('"')
             boundary = f"--{boundary_name}"
 
-        if boundary.lstrip("--") in text:
+        # A quick check: if the boundary string appears in the body, it's multipart.
+        if boundary.lstrip("-") in text:
             return self._parse_multipart(text, boundary)
 
-        # Fallback: plain JSON body
+        # --- Fallback: plain JSON body (parameterFormatType=JSON) ---
         try:
             payload = json.loads(text)
             if "AccessControllerEvent" in payload:
                 return [payload]
+            # Device might wrap in a list
+            if isinstance(payload, list):
+                return [p for p in payload if "AccessControllerEvent" in p]
         except (json.JSONDecodeError, ValueError):
             pass
 
+        _LOGGER.debug("Hikvision webhook: could not parse body (len=%d)", len(body))
         return []
 
     @staticmethod
