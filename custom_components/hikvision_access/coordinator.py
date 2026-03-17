@@ -147,6 +147,12 @@ class HikvisionCoordinator:
                     ev.get("event_code") if ev else "?",
                     (ev.get("person_name") if ev else None) or "—",
                 )
+                # If the device didn't send a binary image but we have a
+                # person, fetch their profile photo from the face library.
+                if not face_image and ev and ev.get("employee_no"):
+                    self.hass.async_create_task(
+                        self._fetch_face_image_async(ev["employee_no"])
+                    )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning(
                 "Hikvision [%s]: webhook handler error: %s", self._host, exc
@@ -420,6 +426,100 @@ class HikvisionCoordinator:
                     face_image = img
 
         return events, face_image
+
+    # ------------------------------------------------------------------
+    # Face image fetch from ISAPI face library
+    # ------------------------------------------------------------------
+
+    async def _fetch_face_image_async(self, employee_no: str) -> None:
+        """Schedule a background fetch of the person's face photo."""
+        image = await self.hass.async_add_executor_job(
+            self._fetch_face_image_sync, employee_no
+        )
+        if image:
+            self.last_face_image = image
+            self.last_face_image_updated = dt.now()
+            _LOGGER.info(
+                "Hikvision [%s]: face image fetched for employee %s (%d bytes)",
+                self._host,
+                employee_no,
+                len(image),
+            )
+            self._notify_listeners()
+
+    def _fetch_face_image_sync(self, employee_no: str) -> bytes | None:
+        """Fetch a person's face photo from the device face library (blocking).
+
+        Strategy:
+        1. POST to FDSearch to find the FDID for the given employee number.
+        2. GET the face picture using the FDID.
+
+        Returns raw JPEG bytes on success, None on any failure.
+        """
+        import warnings  # noqa: PLC0415
+        import xml.etree.ElementTree as ET  # noqa: PLC0415
+
+        auth = HTTPDigestAuth(self._username, self._password)
+        base = f"https://{self._host}"
+        search_body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<FDSearchDescription>"
+            "<searchID>1</searchID>"
+            "<SearchResultPosition>0</SearchResultPosition>"
+            "<maxResults>1</maxResults>"
+            "<EmployeeNoList>"
+            f"<employeeNo>{employee_no}</employeeNo>"
+            "</EmployeeNoList>"
+            "</FDSearchDescription>"
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                resp = requests.post(
+                    f"{base}/ISAPI/Intelligent/FDLib/FDSearch?faceLibType=whiteFD",
+                    data=search_body.encode("utf-8"),
+                    auth=auth,
+                    headers={"Content-Type": "application/xml"},
+                    verify=self._verify_ssl,
+                    timeout=5,
+                )
+                if resp.status_code != 200:
+                    _LOGGER.debug(
+                        "Hikvision [%s]: FDSearch returned %d", self._host, resp.status_code
+                    )
+                    return None
+
+                root = ET.fromstring(resp.text)
+                ns = root.tag.split("}")[0][1:] if root.tag.startswith("{") else ""
+                nsp = f"{{{ns}}}" if ns else ""
+                fdid_elem = root.find(f".//{nsp}FDID")
+                if fdid_elem is None or not fdid_elem.text:
+                    _LOGGER.debug(
+                        "Hikvision [%s]: no FDID found in FDSearch response", self._host
+                    )
+                    return None
+
+                fdid = fdid_elem.text.strip()
+                img_resp = requests.get(
+                    f"{base}/ISAPI/Intelligent/FDLib/1/FaceDataRecord/{fdid}/picture",
+                    auth=auth,
+                    verify=self._verify_ssl,
+                    timeout=5,
+                )
+                if img_resp.status_code == 200 and img_resp.content:
+                    return img_resp.content
+
+                _LOGGER.debug(
+                    "Hikvision [%s]: face picture endpoint returned %d",
+                    self._host,
+                    img_resp.status_code,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Hikvision [%s]: face image fetch failed: %s", self._host, exc
+                )
+        return None
 
     # ------------------------------------------------------------------
     # Event building
