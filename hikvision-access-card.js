@@ -119,6 +119,8 @@ class HikvisionAccessCard extends HTMLElement {
         }
         .header-body:hover .header-title { opacity: .75; }
         .header-title {
+          flex: 1;
+          min-width: 0;
           font-size: 1rem;
           font-weight: 600;
           color: var(--primary-text-color);
@@ -133,6 +135,7 @@ class HikvisionAccessCard extends HTMLElement {
           border-radius: 50%;
           background: ${statusColor};
           flex-shrink: 0;
+          flex-grow: 0;
         }
 
         .lock-btn {
@@ -217,8 +220,8 @@ class HikvisionAccessCard extends HTMLElement {
         <div class="header">
           <ha-icon class="header-icon" icon="mdi:shield-account"></ha-icon>
           <div class="header-body">
-            <div class="header-title">${title}</div>
-            <div class="status-dot" title="${connected ? "Online" : "Offline"}"></div>
+            <span class="header-title">${title}</span>
+            <span class="status-dot" title="${connected ? "Online" : "Offline"}"></span>
           </div>
           <button class="lock-btn" id="lock-toggle" title="${locked ? "Entsperren" : "Sperren"}">
             <ha-icon icon="${locked ? "mdi:lock" : "mdi:lock-open-variant"}"></ha-icon>
