@@ -6,7 +6,7 @@
   "documentation": "https://github.com/yourusername/hikvision-ha",
   "issue_tracker": "https://github.com/yourusername/hikvision-ha/issues",
   "requirements": ["python-debouncer>=0.1.5"],
-  "dependencies": [],
+  "dependencies": ["frontend"],
   "codeowners": [],
   "iot_class": "local_push"
 }

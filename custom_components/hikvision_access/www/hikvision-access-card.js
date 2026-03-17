@@ -280,27 +280,43 @@ class HikvisionAccessCardEditor extends HTMLElement {
     if (!this._config) return;
     this.innerHTML = `
       <style>
-        .editor { display: flex; flex-direction: column; gap: 12px; padding: 8px 0; }
-        label { font-size: .85rem; color: var(--secondary-text-color); display: block; margin-bottom: 3px; }
-        ha-textfield { width: 100%; }
+        .editor { display: flex; flex-direction: column; gap: 14px; padding: 4px 0; }
+        .field label {
+          display: block;
+          font-size: .8rem;
+          font-weight: 500;
+          color: var(--secondary-text-color);
+          margin-bottom: 4px;
+        }
+        .field input {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 8px 10px;
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          background: var(--card-background-color);
+          color: var(--primary-text-color);
+          font-size: .9rem;
+        }
+        .field input:focus {
+          outline: none;
+          border-color: var(--primary-color);
+        }
+        .hint { font-size: .72rem; color: var(--secondary-text-color); margin-top: 3px; }
       </style>
       <div class="editor">
-        <div>
-          <label>Gerät (Entity-Prefix, Pflichtfeld)</label>
-          <ha-textfield
-            id="device"
-            .value="${this._config.device || ""}"
-            placeholder="hintereingang_halle"
-            helper="Gerätename in Kleinbuchstaben, Leerzeichen → _">
-          </ha-textfield>
+        <div class="field">
+          <label>Gerät (Pflichtfeld)</label>
+          <input id="device" type="text"
+            value="${this._config.device || ""}"
+            placeholder="hintereingang_halle">
+          <div class="hint">Entity-Prefix: Gerätename in Kleinbuchstaben, Leerzeichen → _</div>
         </div>
-        <div>
+        <div class="field">
           <label>Titel (optional)</label>
-          <ha-textfield
-            id="title"
-            .value="${this._config.title || ""}"
+          <input id="title" type="text"
+            value="${this._config.title || ""}"
             placeholder="Hintereingang Halle">
-          </ha-textfield>
         </div>
       </div>
     `;
@@ -308,8 +324,8 @@ class HikvisionAccessCardEditor extends HTMLElement {
     ["device", "title"].forEach((id) => {
       const el = this.querySelector(`#${id}`);
       if (el) {
-        el.addEventListener("change", (e) => {
-          this._config = { ...this._config, [id]: e.target.value.trim() };
+        el.addEventListener("input", (e) => {
+          this._config = { ...this._config, [id]: e.target.value };
           this._fire(this._config);
         });
       }
