@@ -121,6 +121,10 @@ class HikvisionCoordinator:
             body = await request.read()
             events, face_image = self._parse_push_body(body, content_type)
 
+            # Also check for base64-encoded image embedded in the JSON payload
+            if not face_image and events:
+                face_image = self._extract_base64_image(events[0])
+
             if face_image:
                 self.last_face_image = face_image
                 self.last_face_image_updated = dt.now()
@@ -147,12 +151,6 @@ class HikvisionCoordinator:
                     ev.get("event_code") if ev else "?",
                     (ev.get("person_name") if ev else None) or "—",
                 )
-                # If the device didn't send a binary image but we have a
-                # person, fetch their profile photo from the face library.
-                if not face_image and ev and ev.get("employee_no"):
-                    self.hass.async_create_task(
-                        self._fetch_face_image_async(ev["employee_no"])
-                    )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning(
                 "Hikvision [%s]: webhook handler error: %s", self._host, exc
@@ -292,14 +290,32 @@ class HikvisionCoordinator:
                     hn.text = ip_or_host
                     _set(target, "ipAddress", "0.0.0.0")
 
-                # Ensure SubscribeEvent / eventMode is present
+                # Ensure SubscribeEvent block is complete:
+                #   heartbeat=30, eventMode=all,
+                #   EventList → AccessControllerEvent with pictureURLType=base64
+                # (base64 embeds the capture image directly in the JSON payload)
                 sub = target.find(f"{nsp}SubscribeEvent")
                 if sub is None:
                     sub = ET.SubElement(target, f"{nsp}SubscribeEvent")
-                em = sub.find(f"{nsp}eventMode")
-                if em is None:
-                    em = ET.SubElement(sub, f"{nsp}eventMode")
-                em.text = "all"
+
+                def _sub_set(parent: ET.Element, tag: str, value: str) -> ET.Element:
+                    el = parent.find(f"{nsp}{tag}")
+                    if el is None:
+                        el = ET.SubElement(parent, f"{nsp}{tag}")
+                    el.text = value
+                    return el
+
+                _sub_set(sub, "heartbeat", "30")
+                _sub_set(sub, "eventMode", "all")
+
+                ev_list = sub.find(f"{nsp}EventList")
+                if ev_list is None:
+                    ev_list = ET.SubElement(sub, f"{nsp}EventList")
+                ev_elem = ev_list.find(f"{nsp}Event")
+                if ev_elem is None:
+                    ev_elem = ET.SubElement(ev_list, f"{nsp}Event")
+                _sub_set(ev_elem, "type", "AccessControllerEvent")
+                _sub_set(ev_elem, "pictureURLType", "base64")
 
                 # Prepend the XML declaration that ET.tostring omits by default
                 modified_xml = (
@@ -427,98 +443,27 @@ class HikvisionCoordinator:
 
         return events, face_image
 
-    # ------------------------------------------------------------------
-    # Face image fetch from ISAPI face library
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_base64_image(payload: dict) -> bytes | None:
+        """Look for a base64-encoded face image inside the JSON event payload.
 
-    async def _fetch_face_image_async(self, employee_no: str) -> None:
-        """Schedule a background fetch of the person's face photo."""
-        image = await self.hass.async_add_executor_job(
-            self._fetch_face_image_sync, employee_no
-        )
-        if image:
-            self.last_face_image = image
-            self.last_face_image_updated = dt.now()
-            _LOGGER.info(
-                "Hikvision [%s]: face image fetched for employee %s (%d bytes)",
-                self._host,
-                employee_no,
-                len(image),
-            )
-            self._notify_listeners()
-
-    def _fetch_face_image_sync(self, employee_no: str) -> bytes | None:
-        """Fetch a person's face photo from the device face library (blocking).
-
-        Strategy:
-        1. POST to FDSearch to find the FDID for the given employee number.
-        2. GET the face picture using the FDID.
-
-        Returns raw JPEG bytes on success, None on any failure.
+        Hikvision devices with pictureURLType=base64 embed the capture image
+        directly in the AccessControllerEvent JSON under various field names
+        depending on firmware version.
         """
-        import warnings  # noqa: PLC0415
-        import xml.etree.ElementTree as ET  # noqa: PLC0415
+        import base64  # noqa: PLC0415
 
-        auth = HTTPDigestAuth(self._username, self._password)
-        base = f"https://{self._host}"
-        search_body = (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            "<FDSearchDescription>"
-            "<searchID>1</searchID>"
-            "<SearchResultPosition>0</SearchResultPosition>"
-            "<maxResults>1</maxResults>"
-            "<EmployeeNoList>"
-            f"<employeeNo>{employee_no}</employeeNo>"
-            "</EmployeeNoList>"
-            "</FDSearchDescription>"
-        )
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            try:
-                resp = requests.post(
-                    f"{base}/ISAPI/Intelligent/FDLib/FDSearch?faceLibType=whiteFD",
-                    data=search_body.encode("utf-8"),
-                    auth=auth,
-                    headers={"Content-Type": "application/xml"},
-                    verify=self._verify_ssl,
-                    timeout=5,
-                )
-                if resp.status_code != 200:
-                    _LOGGER.debug(
-                        "Hikvision [%s]: FDSearch returned %d", self._host, resp.status_code
-                    )
-                    return None
-
-                root = ET.fromstring(resp.text)
-                ns = root.tag.split("}")[0][1:] if root.tag.startswith("{") else ""
-                nsp = f"{{{ns}}}" if ns else ""
-                fdid_elem = root.find(f".//{nsp}FDID")
-                if fdid_elem is None or not fdid_elem.text:
-                    _LOGGER.debug(
-                        "Hikvision [%s]: no FDID found in FDSearch response", self._host
-                    )
-                    return None
-
-                fdid = fdid_elem.text.strip()
-                img_resp = requests.get(
-                    f"{base}/ISAPI/Intelligent/FDLib/1/FaceDataRecord/{fdid}/picture",
-                    auth=auth,
-                    verify=self._verify_ssl,
-                    timeout=5,
-                )
-                if img_resp.status_code == 200 and img_resp.content:
-                    return img_resp.content
-
-                _LOGGER.debug(
-                    "Hikvision [%s]: face picture endpoint returned %d",
-                    self._host,
-                    img_resp.status_code,
-                )
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.debug(
-                    "Hikvision [%s]: face image fetch failed: %s", self._host, exc
-                )
+        ace = payload.get("AccessControllerEvent", {})
+        # Known field names across different Hikvision firmware versions
+        for field in ("faceImage", "faceImageBase64", "captureImage", "picture", "picData"):
+            raw = ace.get(field) or payload.get(field)
+            if raw and isinstance(raw, str):
+                try:
+                    data = base64.b64decode(raw)
+                    if data:
+                        return data
+                except Exception:  # noqa: BLE001
+                    pass
         return None
 
     # ------------------------------------------------------------------
