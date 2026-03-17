@@ -23,6 +23,7 @@ import ipaddress
 import json
 import logging
 from collections.abc import Callable
+from datetime import datetime as dt
 from typing import Any
 from urllib.parse import urlparse
 
@@ -69,12 +70,15 @@ class HikvisionCoordinator:
         self._verify_ssl: bool = config.get(CONF_VERIFY_SSL, False)
         self.name: str = config.get(CONF_NAME, self._host)
 
-        # Public state — read by sensor / binary_sensor entities
+        # Public state — read by sensor / binary_sensor / image entities
         self.last_event: dict[str, Any] | None = None
         self.last_person_event: dict[str, Any] | None = None
         self.door_is_open: bool | None = None
         self.last_access_status: str | None = None
         self.stream_status: str = STREAM_STATUS_DISCONNECTED
+        # Last face image captured at the reader (JPEG bytes or None)
+        self.last_face_image: bytes | None = None
+        self.last_face_image_updated: dt | None = None
 
         self._listeners: list[Callable] = []
 
@@ -115,29 +119,33 @@ class HikvisionCoordinator:
         )
         try:
             body = await request.read()
-            # Log raw body so we can see exactly what the device sends.
-            # Shown at WARNING so it's visible even without debug logging.
-            _LOGGER.warning(
-                "Hikvision [%s]: raw body (%d bytes):\n%s",
-                self._host,
-                len(body),
-                body.decode("utf-8", errors="replace")[:1000],
-            )
-            events = self._parse_push_body(body, content_type)
+            events, face_image = self._parse_push_body(body, content_type)
+
+            if face_image:
+                self.last_face_image = face_image
+                self.last_face_image_updated = dt.now()
+                _LOGGER.info(
+                    "Hikvision [%s]: face image received (%d bytes)",
+                    self._host,
+                    len(face_image),
+                )
+
             if not events:
                 _LOGGER.warning(
-                    "Hikvision [%s]: ⚠ webhook received but 0 events parsed "
-                    "(unexpected body format — see raw body above)",
+                    "Hikvision [%s]: ⚠ webhook body (%d bytes) — 0 events parsed.\n%s",
                     self._host,
+                    len(body),
+                    body.decode("utf-8", errors="replace")[:800],
                 )
-            for event in events:
-                self._dispatch_event(event)
+            for payload in events:
+                self._dispatch_event(payload)
+                ev = self.last_event  # built event from _dispatch_event
                 _LOGGER.info(
                     "Hikvision [%s]: ✓ event — %s (%s) person=%s",
                     self._host,
-                    event.get("event_label"),
-                    event.get("event_code"),
-                    event.get("person_name") or "—",
+                    ev.get("event_label") if ev else "?",
+                    ev.get("event_code") if ev else "?",
+                    (ev.get("person_name") if ev else None) or "—",
                 )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning(
@@ -292,9 +300,6 @@ class HikvisionCoordinator:
                     '<?xml version="1.0" encoding="UTF-8"?>'
                     + ET.tostring(root, encoding="unicode")
                 )
-                _LOGGER.warning(
-                    "Hikvision [%s]: PUT XML body:\n%s", self._host, modified_xml
-                )
 
             except ET.ParseError as exc:
                 _LOGGER.warning(
@@ -340,65 +345,81 @@ class HikvisionCoordinator:
     # Multipart / JSON body parsing
     # ------------------------------------------------------------------
 
-    def _parse_push_body(self, body: bytes, content_type: str) -> list[dict]:
-        """Parse the raw POST body into a list of AccessControllerEvent dicts.
+    def _parse_push_body(
+        self, body: bytes, content_type: str
+    ) -> tuple[list[dict], bytes | None]:
+        """Parse raw POST body → (event list, optional face image bytes).
 
-        Supports two formats the device may send:
-        - multipart/form-data  (same structure as alertStream, parameterFormatType=XML)
-        - application/json     (plain JSON body, parameterFormatType=JSON)
-
-        The boundary name is extracted from the Content-Type header when present;
-        "MIME_boundary" is the well-known Hikvision default.
+        Operates on raw bytes so that binary image parts survive unchanged.
+        Supports:
+        - multipart/form-data  (Hikvision default; may contain image part)
+        - application/json     (plain JSON fallback)
         """
-        text = body.decode("utf-8", errors="ignore")
-
-        # --- Try multipart first ---
-        boundary = "--MIME_boundary"
+        # --- Try multipart ---
+        boundary_name = "MIME_boundary"
         if "boundary=" in content_type:
             boundary_name = content_type.split("boundary=")[-1].strip().strip('"')
-            boundary = f"--{boundary_name}"
 
-        # A quick check: if the boundary string appears in the body, it's multipart.
-        if boundary.lstrip("-") in text:
-            return self._parse_multipart(text, boundary)
+        boundary_bytes = f"--{boundary_name}".encode()
+        if boundary_bytes in body:
+            return self._parse_multipart_bytes(body, boundary_bytes)
 
-        # --- Fallback: plain JSON body (parameterFormatType=JSON) ---
+        # --- Fallback: plain JSON ---
         try:
+            text = body.decode("utf-8", errors="ignore")
             payload = json.loads(text)
             if "AccessControllerEvent" in payload:
-                return [payload]
-            # Device might wrap in a list
+                return [payload], None
             if isinstance(payload, list):
-                return [p for p in payload if "AccessControllerEvent" in p]
+                return (
+                    [p for p in payload if "AccessControllerEvent" in p],
+                    None,
+                )
         except (json.JSONDecodeError, ValueError):
             pass
 
-        _LOGGER.debug("Hikvision webhook: could not parse body (len=%d)", len(body))
-        return []
+        return [], None
 
     @staticmethod
-    def _parse_multipart(text: str, boundary: str) -> list[dict]:
-        """Split a multipart body on the given boundary and extract JSON parts."""
-        results: list[dict] = []
-        parts = text.split(boundary)
-        for part in parts:
-            part = part.strip().lstrip("-").strip()
+    def _parse_multipart_bytes(
+        body: bytes, boundary: bytes
+    ) -> tuple[list[dict], bytes | None]:
+        """Split a multipart body (bytes) into JSON events and an optional image.
+
+        Works on raw bytes so JPEG data in image parts is not corrupted by
+        a UTF-8 decode/encode round-trip.
+        """
+        events: list[dict] = []
+        face_image: bytes | None = None
+
+        for part in body.split(boundary):
+            # Strip leading/trailing CRLF and the final "--" terminator
+            part = part.strip(b"\r\n").lstrip(b"-").strip(b"\r\n")
             if not part:
                 continue
-            separator = "\r\n\r\n" if "\r\n\r\n" in part else "\n\n"
-            if separator not in part:
+
+            # Split part headers from body
+            sep = b"\r\n\r\n" if b"\r\n\r\n" in part else b"\n\n"
+            if sep not in part:
                 continue
-            _, body_part = part.split(separator, 1)
-            body_part = body_part.strip()
-            if not body_part.startswith("{"):
-                continue
-            try:
-                payload = json.loads(body_part)
-                if "AccessControllerEvent" in payload:
-                    results.append(payload)
-            except (json.JSONDecodeError, ValueError):
-                continue
-        return results
+            header_bytes, body_part = part.split(sep, 1)
+            header_text = header_bytes.decode("utf-8", errors="ignore").lower()
+
+            if "application/json" in header_text:
+                text = body_part.strip().decode("utf-8", errors="ignore")
+                if text.startswith("{"):
+                    try:
+                        payload = json.loads(text)
+                        if "AccessControllerEvent" in payload:
+                            events.append(payload)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+            elif "image/" in header_text:
+                img = body_part.strip(b"\r\n")
+                if img:
+                    face_image = img
+
+        return events, face_image
 
     # ------------------------------------------------------------------
     # Event building

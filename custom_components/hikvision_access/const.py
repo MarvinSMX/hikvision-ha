@@ -3,7 +3,7 @@
 DOMAIN = "hikvision_access"
 EVENT_TYPE = "hikvision_access_event"
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "image"]
 
 CONF_HOST = "host"
 CONF_USERNAME = "username"

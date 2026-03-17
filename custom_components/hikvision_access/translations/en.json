@@ -64,6 +64,11 @@
       "door": {
         "name": "Door"
       }
+    },
+    "image": {
+      "last_face": {
+        "name": "Last Face Image"
+      }
     }
   }
 }
