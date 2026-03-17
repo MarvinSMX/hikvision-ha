@@ -137,7 +137,9 @@ class HikvisionAccessCard extends HTMLElement {
           display: flex;
           flex-direction: column;
           gap: 3px;
+          cursor: pointer;
         }
+        .tile:hover { background: var(--secondary-background-color); }
         .tile-label {
           font-size: 0.7rem;
           text-transform: uppercase;
@@ -188,7 +190,7 @@ class HikvisionAccessCard extends HTMLElement {
         </div>
 
         <div class="grid">
-          <div class="tile">
+          <div class="tile" data-entity="binary_sensor.${p}_tur">
             <div class="tile-label">Tür</div>
             <div class="tile-value" style="color:${doorColor}">
               <ha-icon icon="${doorIcon}"></ha-icon>
@@ -196,7 +198,7 @@ class HikvisionAccessCard extends HTMLElement {
             </div>
           </div>
 
-          <div class="tile">
+          <div class="tile" data-entity="binary_sensor.${p}_bewegungsmelder">
             <div class="tile-label">Aktivität</div>
             <div class="tile-value" style="color:${motionActive ? "var(--warning-color,#FF9800)" : "var(--secondary-text-color)"}">
               <ha-icon
@@ -207,7 +209,7 @@ class HikvisionAccessCard extends HTMLElement {
             </div>
           </div>
 
-          <div class="tile">
+          <div class="tile" data-entity="sensor.${p}_letzte_person">
             <div class="tile-label">Letzte Person</div>
             <div class="tile-value">
               <ha-icon icon="mdi:account" style="color:var(--primary-color)"></ha-icon>
@@ -215,7 +217,7 @@ class HikvisionAccessCard extends HTMLElement {
             </div>
           </div>
 
-          <div class="tile">
+          <div class="tile" data-entity="sensor.${p}_zugang">
             <div class="tile-label">Zugang</div>
             <div class="tile-value" style="color:${accessColor}">
               <ha-icon icon="${accessIcon}"></ha-icon>
@@ -249,6 +251,7 @@ class HikvisionAccessCard extends HTMLElement {
   }
 
   _bindClicks(p) {
+    // Header → more-info Gerätestatus
     const header = this.shadowRoot.querySelector(".header");
     if (header) {
       header.addEventListener("click", () =>
@@ -256,6 +259,14 @@ class HikvisionAccessCard extends HTMLElement {
       );
     }
 
+    // Tiles → more-info der jeweiligen Entität
+    this.shadowRoot.querySelectorAll(".tile[data-entity]").forEach((tile) => {
+      tile.addEventListener("click", () =>
+        this._moreInfo(tile.dataset.entity)
+      );
+    });
+
+    // Verlauf-Zeile → History-Seite
     const eventRow = this.shadowRoot.querySelector(".event-row");
     if (eventRow) {
       const ids = [
