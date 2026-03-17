@@ -93,40 +93,65 @@ class HikvisionAccessCard extends HTMLElement {
     const accessLabel = granted   ? "Gewährt"    : denied ? "Verweigert" : "—";
     const accessIcon  = granted   ? "mdi:check-circle" : denied ? "mdi:close-circle" : "mdi:minus-circle-outline";
 
+    const lockColor = locked ? "var(--error-color,#F44336)" : "var(--success-color,#4CAF50)";
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
         ha-card { padding: 0; overflow: hidden; }
 
+        /* ── Header ── */
         .header {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 14px 16px 10px;
+          gap: 12px;
+          padding: 18px 18px 16px;
           border-bottom: 1px solid var(--divider-color);
+        }
+        .header-icon { --mdc-icon-size: 22px; color: var(--primary-color); flex-shrink: 0; }
+        .header-body {
+          flex: 1;
+          min-width: 0;
           cursor: pointer;
         }
-        .header:hover { background: var(--secondary-background-color); }
-        .header ha-icon { --mdc-icon-size: 24px; color: var(--primary-color); }
+        .header-body:hover .header-title { opacity: .75; }
         .header-title {
-          flex: 1;
           font-size: 1rem;
           font-weight: 600;
           color: var(--primary-text-color);
+          transition: opacity .15s;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
-        .status-pill {
+        .header-sub {
           display: flex;
           align-items: center;
           gap: 5px;
+          margin-top: 2px;
           font-size: 0.72rem;
           font-weight: 500;
           color: ${statusColor};
-          background: ${statusColor}22;
-          padding: 2px 8px;
-          border-radius: 99px;
         }
-        .status-dot { width: 7px; height: 7px; border-radius: 50%; background: ${statusColor}; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: ${statusColor}; flex-shrink: 0; }
 
+        .lock-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 38px;
+          height: 38px;
+          border-radius: 50%;
+          border: none;
+          background: ${lockColor}18;
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: background .2s;
+        }
+        .lock-btn:hover { background: ${lockColor}30; }
+        .lock-btn ha-icon { --mdc-icon-size: 20px; color: ${lockColor}; }
+
+        /* ── Grid ── */
         .grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -136,82 +161,53 @@ class HikvisionAccessCard extends HTMLElement {
         }
         .tile {
           background: var(--card-background-color);
-          padding: 12px 14px;
+          padding: 16px 18px;
           display: flex;
           flex-direction: column;
-          gap: 3px;
+          gap: 6px;
           cursor: pointer;
+          transition: background .15s;
         }
         .tile:hover { background: var(--secondary-background-color); }
         .tile-label {
-          font-size: 0.7rem;
+          font-size: 0.68rem;
           text-transform: uppercase;
-          letter-spacing: .05em;
+          letter-spacing: .07em;
           color: var(--secondary-text-color);
+          font-weight: 500;
         }
         .tile-value {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: .95rem;
+          gap: 7px;
+          font-size: 1rem;
           font-weight: 600;
+          min-width: 0;
         }
-        .tile-value ha-icon { --mdc-icon-size: 17px; }
+        .tile-value ha-icon { --mdc-icon-size: 18px; flex-shrink: 0; }
+        .tile-value span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .lock-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 11px 16px;
-          border-bottom: 1px solid var(--divider-color);
-          background: var(--card-background-color);
-        }
-        .lock-label {
-          flex: 1;
-          font-size: .88rem;
-          font-weight: 500;
-          color: var(--primary-text-color);
-        }
-        .lock-sublabel { font-size: .73rem; color: var(--secondary-text-color); margin-top: 1px; }
-        .lock-icon { --mdc-icon-size: 20px; flex-shrink: 0; }
-        .lock-btn {
-          border: none;
-          border-radius: 99px;
-          padding: 5px 14px;
-          font-size: .8rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: opacity .15s;
-        }
-        .lock-btn:hover { opacity: .82; }
-        .lock-btn.locked {
-          background: var(--error-color, #F44336);
-          color: #fff;
-        }
-        .lock-btn.unlocked {
-          background: var(--success-color, #4CAF50);
-          color: #fff;
-        }
-
+        /* ── Event row ── */
         .event-row {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 12px 16px;
+          gap: 12px;
+          padding: 14px 18px;
           cursor: pointer;
+          transition: background .15s;
         }
         .event-row:hover { background: var(--secondary-background-color); }
-        .event-icon { --mdc-icon-size: 20px; color: var(--primary-color); flex-shrink: 0; }
+        .event-icon { --mdc-icon-size: 18px; color: var(--secondary-text-color); flex-shrink: 0; }
         .event-info { flex: 1; min-width: 0; }
         .event-label {
-          font-size: .88rem;
+          font-size: .85rem;
           font-weight: 500;
           color: var(--primary-text-color);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        .event-time { font-size: .73rem; color: var(--secondary-text-color); margin-top: 1px; }
+        .event-time { font-size: .72rem; color: var(--secondary-text-color); margin-top: 2px; }
 
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
         .pulsing { animation: pulse 1.2s infinite; }
@@ -219,12 +215,17 @@ class HikvisionAccessCard extends HTMLElement {
 
       <ha-card>
         <div class="header">
-          <ha-icon icon="mdi:shield-account"></ha-icon>
-          <span class="header-title">${title}</span>
-          <div class="status-pill">
-            <div class="status-dot"></div>
-            ${connected ? "Online" : "Offline"}
+          <ha-icon class="header-icon" icon="mdi:shield-account"></ha-icon>
+          <div class="header-body">
+            <div class="header-title">${title}</div>
+            <div class="header-sub">
+              <div class="status-dot"></div>
+              ${connected ? "Online" : "Offline"}
+            </div>
           </div>
+          <button class="lock-btn" id="lock-toggle" title="${locked ? "Entsperren" : "Sperren"}">
+            <ha-icon icon="${locked ? "mdi:lock" : "mdi:lock-open-variant"}"></ha-icon>
+          </button>
         </div>
 
         <div class="grid">
@@ -232,7 +233,7 @@ class HikvisionAccessCard extends HTMLElement {
             <div class="tile-label">Tür</div>
             <div class="tile-value" style="color:${doorColor}">
               <ha-icon icon="${doorIcon}"></ha-icon>
-              ${doorLabel}
+              <span>${doorLabel}</span>
             </div>
           </div>
 
@@ -243,15 +244,15 @@ class HikvisionAccessCard extends HTMLElement {
                 icon="${motionActive ? "mdi:motion-sensor" : "mdi:motion-sensor-off"}"
                 class="${motionActive ? "pulsing" : ""}">
               </ha-icon>
-              ${motionActive ? "Aktiv" : "Ruhig"}
+              <span>${motionActive ? "Aktiv" : "Ruhig"}</span>
             </div>
           </div>
 
           <div class="tile" data-entity="sensor.${p}_letzte_person">
             <div class="tile-label">Letzte Person</div>
-            <div class="tile-value">
+            <div class="tile-value" style="color:var(--primary-text-color)">
               <ha-icon icon="mdi:account" style="color:var(--primary-color)"></ha-icon>
-              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${personState}</span>
+              <span>${personState}</span>
             </div>
           </div>
 
@@ -259,23 +260,9 @@ class HikvisionAccessCard extends HTMLElement {
             <div class="tile-label">Zugang</div>
             <div class="tile-value" style="color:${accessColor}">
               <ha-icon icon="${accessIcon}"></ha-icon>
-              ${accessLabel}
+              <span>${accessLabel}</span>
             </div>
           </div>
-        </div>
-
-        <div class="lock-row">
-          <ha-icon class="lock-icon"
-            icon="${locked ? "mdi:lock" : "mdi:lock-open-variant"}"
-            style="color:${locked ? "var(--error-color,#F44336)" : "var(--success-color,#4CAF50)"}">
-          </ha-icon>
-          <div style="flex:1">
-            <div class="lock-label">Zugangssperre</div>
-            <div class="lock-sublabel">${locked ? "Zugang gesperrt — niemand kann eintreten" : "Normalbetrieb — Gesichtserkennung aktiv"}</div>
-          </div>
-          <button class="lock-btn ${locked ? "locked" : "unlocked"}" id="lock-toggle">
-            ${locked ? "Entsperren" : "Sperren"}
-          </button>
         </div>
 
         <div class="event-row">
@@ -303,10 +290,10 @@ class HikvisionAccessCard extends HTMLElement {
   }
 
   _bindClicks(p) {
-    // Header → more-info Gerätestatus
-    const header = this.shadowRoot.querySelector(".header");
-    if (header) {
-      header.addEventListener("click", () =>
+    // Header-Body → more-info Gerätestatus
+    const headerBody = this.shadowRoot.querySelector(".header-body");
+    if (headerBody) {
+      headerBody.addEventListener("click", () =>
         this._moreInfo(`sensor.${p}_geratestatus`)
       );
     }
