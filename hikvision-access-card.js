@@ -105,7 +105,7 @@ class HikvisionAccessCard extends HTMLElement {
           display: flex;
           align-items: center;
           gap: 12px;
-          padding: 18px 18px 16px;
+          padding: 14px 16px 12px;
           border-bottom: 1px solid var(--divider-color);
         }
         .header-icon { --mdc-icon-size: 22px; color: var(--primary-color); flex-shrink: 0; }
@@ -113,6 +113,9 @@ class HikvisionAccessCard extends HTMLElement {
           flex: 1;
           min-width: 0;
           cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
         .header-body:hover .header-title { opacity: .75; }
         .header-title {
@@ -124,16 +127,13 @@ class HikvisionAccessCard extends HTMLElement {
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        .header-sub {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          margin-top: 2px;
-          font-size: 0.72rem;
-          font-weight: 500;
-          color: ${statusColor};
+        .status-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: ${statusColor};
+          flex-shrink: 0;
         }
-        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: ${statusColor}; flex-shrink: 0; }
 
         .lock-btn {
           display: flex;
@@ -161,10 +161,10 @@ class HikvisionAccessCard extends HTMLElement {
         }
         .tile {
           background: var(--card-background-color);
-          padding: 16px 18px;
+          padding: 13px 16px;
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 4px;
           cursor: pointer;
           transition: background .15s;
         }
@@ -179,8 +179,8 @@ class HikvisionAccessCard extends HTMLElement {
         .tile-value {
           display: flex;
           align-items: center;
-          gap: 7px;
-          font-size: 1rem;
+          gap: 6px;
+          font-size: .92rem;
           font-weight: 600;
           min-width: 0;
         }
@@ -192,7 +192,7 @@ class HikvisionAccessCard extends HTMLElement {
           display: flex;
           align-items: center;
           gap: 12px;
-          padding: 14px 18px;
+          padding: 11px 16px;
           cursor: pointer;
           transition: background .15s;
         }
@@ -218,10 +218,7 @@ class HikvisionAccessCard extends HTMLElement {
           <ha-icon class="header-icon" icon="mdi:shield-account"></ha-icon>
           <div class="header-body">
             <div class="header-title">${title}</div>
-            <div class="header-sub">
-              <div class="status-dot"></div>
-              ${connected ? "Online" : "Offline"}
-            </div>
+            <div class="status-dot" title="${connected ? "Online" : "Offline"}"></div>
           </div>
           <button class="lock-btn" id="lock-toggle" title="${locked ? "Entsperren" : "Sperren"}">
             <ha-icon icon="${locked ? "mdi:lock" : "mdi:lock-open-variant"}"></ha-icon>
