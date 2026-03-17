@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import logging
 import secrets
+from pathlib import Path
 
 from homeassistant.components import webhook
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -19,6 +21,16 @@ from .const import (
 from .coordinator import HikvisionCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+_CARD_URL = "/hikvision_access/hikvision-access-card.js"
+_CARD_FILE = Path(__file__).parent / "www" / "hikvision-access-card.js"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register the Lovelace card as a frontend resource (runs once on HA start)."""
+    hass.http.register_static_path(_CARD_URL, str(_CARD_FILE), cache_headers=False)
+    add_extra_js_url(hass, _CARD_URL)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
