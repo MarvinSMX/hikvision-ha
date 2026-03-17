@@ -21,8 +21,8 @@ ACS_CAPS_PATH = "/ISAPI/AccessControl/GetAcsEvent/capabilities"
 REMOTE_CONTROL_PATH = "/ISAPI/AccessControl/RemoteControl/door/1"
 
 # Remote control commands
-CMD_NORMAL = "normal"           # Normalbetrieb (Gesichtserkennung aktiv)
-CMD_ALWAYS_CLOSED = "alwaysClosed"  # Dauerhaft gesperrt
+CMD_UNLOCK = "close"        # Tür schließen → Normalbetrieb (Gesichtserkennung aktiv)
+CMD_LOCK = "alwaysClose"    # Dauerhaft gesperrt — niemand kann eintreten
 
 # Binary sensor auto-reset duration
 BINARY_SENSOR_ACTIVE_SECONDS = 3

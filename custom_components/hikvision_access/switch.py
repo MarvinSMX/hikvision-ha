@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CMD_ALWAYS_CLOSED, CMD_NORMAL, DOMAIN
+from .const import CMD_LOCK, CMD_UNLOCK, DOMAIN
 from .coordinator import HikvisionCoordinator
 
 
@@ -51,18 +51,18 @@ class HikvisionAccessLockSwitch(SwitchEntity):
         return self._is_on
 
     async def async_turn_on(self, **kwargs) -> None:
-        """Zugang sperren — alwaysClosed."""
+        """Zugang sperren — alwaysClose."""
         ok = await self.hass.async_add_executor_job(
-            self._coordinator.remote_control, CMD_ALWAYS_CLOSED
+            self._coordinator.remote_control, CMD_LOCK
         )
         if ok:
             self._is_on = True
             self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Normalbetrieb wiederherstellen."""
+        """Normalbetrieb wiederherstellen — close."""
         ok = await self.hass.async_add_executor_job(
-            self._coordinator.remote_control, CMD_NORMAL
+            self._coordinator.remote_control, CMD_UNLOCK
         )
         if ok:
             self._is_on = False

@@ -360,12 +360,12 @@ class HikvisionCoordinator:
 
         from .const import REMOTE_CONTROL_PATH  # noqa: PLC0415
 
-        # Namespace required by Hikvision ISAPI (same schema as httpHosts responses)
+        # Confirmed working format via ISAPI capabilities check
         xml_body = (
             '<?xml version="1.0" encoding="UTF-8"?>'
-            '<RemoteControlDoor version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">'
+            "<RemoteControlDoor>"
             "<doorNo>1</doorNo>"
-            f"<controlCode>{command}</controlCode>"
+            f"<cmd>{command}</cmd>"
             "</RemoteControlDoor>"
         )
         url = f"https://{self._host}{REMOTE_CONTROL_PATH}"
@@ -389,17 +389,12 @@ class HikvisionCoordinator:
                     return True
                 _LOGGER.warning(
                     "Hikvision [%s]: remote_control '%s' → HTTP %d: %s",
-                    self._host,
-                    command,
-                    resp.status_code,
-                    resp.text[:200],
+                    self._host, command, resp.status_code, resp.text,
                 )
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.warning(
                     "Hikvision [%s]: remote_control '%s' failed: %s",
-                    self._host,
-                    command,
-                    exc,
+                    self._host, command, exc,
                 )
         return False
 
