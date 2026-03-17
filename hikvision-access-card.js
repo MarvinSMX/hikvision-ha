@@ -101,7 +101,9 @@ class HikvisionAccessCard extends HTMLElement {
           gap: 10px;
           padding: 14px 16px 10px;
           border-bottom: 1px solid var(--divider-color);
+          cursor: pointer;
         }
+        .header:hover { background: var(--secondary-background-color); }
         .header ha-icon { --mdc-icon-size: 24px; color: var(--primary-color); }
         .header-title {
           flex: 1;
@@ -156,7 +158,9 @@ class HikvisionAccessCard extends HTMLElement {
           align-items: center;
           gap: 10px;
           padding: 12px 16px;
+          cursor: pointer;
         }
+        .event-row:hover { background: var(--secondary-background-color); }
         .event-icon { --mdc-icon-size: 20px; color: var(--primary-color); flex-shrink: 0; }
         .event-info { flex: 1; min-width: 0; }
         .event-label {
@@ -229,6 +233,41 @@ class HikvisionAccessCard extends HTMLElement {
         </div>
       </ha-card>
     `;
+
+    this._bindClicks(p);
+  }
+
+  _navigate(path) {
+    history.pushState(null, "", path);
+    window.dispatchEvent(new CustomEvent("location-changed", { bubbles: true, composed: true }));
+  }
+
+  _moreInfo(entityId) {
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      bubbles: true, composed: true, detail: { entityId },
+    }));
+  }
+
+  _bindClicks(p) {
+    const header = this.shadowRoot.querySelector(".header");
+    if (header) {
+      header.addEventListener("click", () =>
+        this._moreInfo(`sensor.${p}_geratestatus`)
+      );
+    }
+
+    const eventRow = this.shadowRoot.querySelector(".event-row");
+    if (eventRow) {
+      const ids = [
+        `sensor.${p}_letztes_event`,
+        `sensor.${p}_letzte_person`,
+        `binary_sensor.${p}_tur`,
+        `sensor.${p}_zugang`,
+      ].join(",");
+      eventRow.addEventListener("click", () =>
+        this._navigate(`/history?entity_id=${ids}`)
+      );
+    }
   }
 
   getCardSize() { return 3; }
