@@ -66,6 +66,10 @@
       "door": {
         "name": "Tür"
       }
-    }
+    },
+    "switch": {
+      "access_lock": {
+        "name": "Zugangssperre"
+      }
   }
 }

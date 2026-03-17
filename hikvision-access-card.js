@@ -72,6 +72,9 @@ class HikvisionAccessCard extends HTMLElement {
     const evTimeState  = this._val(`sensor.${p}_zeit_des_letzten_events`);
     const accessState  = this._val(`sensor.${p}_zugang`);
     const devStatus    = this._val(`sensor.${p}_geratestatus`);
+    const lockEntityId = `switch.${p}_zugangssperre`;
+    const lockState    = this._val(lockEntityId);
+    const locked       = lockState === "on";
 
     const doorOpen     = doorState === "on";
     const motionActive = motionState === "on";
@@ -155,6 +158,41 @@ class HikvisionAccessCard extends HTMLElement {
         }
         .tile-value ha-icon { --mdc-icon-size: 17px; }
 
+        .lock-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 11px 16px;
+          border-bottom: 1px solid var(--divider-color);
+          background: var(--card-background-color);
+        }
+        .lock-label {
+          flex: 1;
+          font-size: .88rem;
+          font-weight: 500;
+          color: var(--primary-text-color);
+        }
+        .lock-sublabel { font-size: .73rem; color: var(--secondary-text-color); margin-top: 1px; }
+        .lock-icon { --mdc-icon-size: 20px; flex-shrink: 0; }
+        .lock-btn {
+          border: none;
+          border-radius: 99px;
+          padding: 5px 14px;
+          font-size: .8rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity .15s;
+        }
+        .lock-btn:hover { opacity: .82; }
+        .lock-btn.locked {
+          background: var(--error-color, #F44336);
+          color: #fff;
+        }
+        .lock-btn.unlocked {
+          background: var(--success-color, #4CAF50);
+          color: #fff;
+        }
+
         .event-row {
           display: flex;
           align-items: center;
@@ -226,6 +264,20 @@ class HikvisionAccessCard extends HTMLElement {
           </div>
         </div>
 
+        <div class="lock-row">
+          <ha-icon class="lock-icon"
+            icon="${locked ? "mdi:lock" : "mdi:lock-open-variant"}"
+            style="color:${locked ? "var(--error-color,#F44336)" : "var(--success-color,#4CAF50)"}">
+          </ha-icon>
+          <div style="flex:1">
+            <div class="lock-label">Zugangssperre</div>
+            <div class="lock-sublabel">${locked ? "Zugang gesperrt — niemand kann eintreten" : "Normalbetrieb — Gesichtserkennung aktiv"}</div>
+          </div>
+          <button class="lock-btn ${locked ? "locked" : "unlocked"}" id="lock-toggle">
+            ${locked ? "Entsperren" : "Sperren"}
+          </button>
+        </div>
+
         <div class="event-row">
           <ha-icon class="event-icon" icon="mdi:history"></ha-icon>
           <div class="event-info">
@@ -265,6 +317,19 @@ class HikvisionAccessCard extends HTMLElement {
         this._moreInfo(tile.dataset.entity)
       );
     });
+
+    // Zugangssperre-Toggle
+    const lockBtn = this.shadowRoot.querySelector("#lock-toggle");
+    if (lockBtn) {
+      const lockEntityId = `switch.${p}_zugangssperre`;
+      lockBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const locked = this._val(lockEntityId) === "on";
+        this._hass.callService("switch", locked ? "turn_off" : "turn_on", {
+          entity_id: lockEntityId,
+        });
+      });
+    }
 
     // Verlauf-Zeile → History-Seite
     const eventRow = this.shadowRoot.querySelector(".event-row");

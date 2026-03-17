@@ -3,7 +3,7 @@
 DOMAIN = "hikvision_access"
 EVENT_TYPE = "hikvision_access_event"
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "switch"]
 
 CONF_HOST = "host"
 CONF_USERNAME = "username"
@@ -18,6 +18,11 @@ CONF_NOTIFICATION_PORT = "notification_port"
 HTTP_HOSTS_PATH = "/ISAPI/Event/notification/httpHosts"
 DEVICE_INFO_PATH = "/ISAPI/System/deviceInfo"
 ACS_CAPS_PATH = "/ISAPI/AccessControl/GetAcsEvent/capabilities"
+REMOTE_CONTROL_PATH = "/ISAPI/AccessControl/RemoteControl/door/1"
+
+# Remote control commands
+CMD_NORMAL = "normal"           # Normalbetrieb (Gesichtserkennung aktiv)
+CMD_ALWAYS_CLOSED = "alwaysClosed"  # Dauerhaft gesperrt
 
 # Binary sensor auto-reset duration
 BINARY_SENSOR_ACTIVE_SECONDS = 3

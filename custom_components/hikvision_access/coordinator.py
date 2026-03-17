@@ -347,6 +347,62 @@ class HikvisionCoordinator:
         return False
 
     # ------------------------------------------------------------------
+    # Remote door control
+    # ------------------------------------------------------------------
+
+    def remote_control(self, command: str) -> bool:
+        """Send a remote control command to the door (blocking, call via executor).
+
+        command: one of CMD_NORMAL, CMD_ALWAYS_CLOSED  (from const.py)
+        Returns True on success.
+        """
+        import warnings  # noqa: PLC0415
+
+        from .const import REMOTE_CONTROL_PATH  # noqa: PLC0415
+
+        xml_body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<RemoteControlDoor>"
+            "<doorNo>1</doorNo>"
+            f"<controlCode>{command}</controlCode>"
+            "</RemoteControlDoor>"
+        )
+        url = f"https://{self._host}{REMOTE_CONTROL_PATH}"
+        auth = HTTPDigestAuth(self._username, self._password)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                resp = requests.put(
+                    url,
+                    data=xml_body.encode("utf-8"),
+                    auth=auth,
+                    headers={"Content-Type": "application/xml"},
+                    verify=self._verify_ssl,
+                    timeout=10,
+                )
+                if resp.status_code in (200, 201):
+                    _LOGGER.info(
+                        "Hikvision [%s]: remote_control '%s' → OK", self._host, command
+                    )
+                    return True
+                _LOGGER.warning(
+                    "Hikvision [%s]: remote_control '%s' → HTTP %d: %s",
+                    self._host,
+                    command,
+                    resp.status_code,
+                    resp.text[:200],
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Hikvision [%s]: remote_control '%s' failed: %s",
+                    self._host,
+                    command,
+                    exc,
+                )
+        return False
+
+    # ------------------------------------------------------------------
     # Multipart / JSON body parsing
     # ------------------------------------------------------------------
 

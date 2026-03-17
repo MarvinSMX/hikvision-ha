@@ -66,6 +66,10 @@
       "door": {
         "name": "Door"
       }
-    }
+    },
+    "switch": {
+      "access_lock": {
+        "name": "Access Lock"
+      }
   }
 }
