@@ -15,7 +15,9 @@
         "title": "Gerätename bestätigen",
         "description": "Der Name wurde automatisch vom Gerät ermittelt: **{detected_name}**\nDu kannst ihn hier anpassen.",
         "data": {
-          "name": "Anzeigename"
+          "name": "Anzeigename",
+          "notification_ip": "HA-Benachrichtigungs-IP",
+          "notification_port": "HA-Benachrichtigungs-Port"
         }
       }
     },

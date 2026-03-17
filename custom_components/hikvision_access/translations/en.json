@@ -15,7 +15,9 @@
         "title": "Confirm device name",
         "description": "Name detected automatically from the device: **{detected_name}**\nYou can change it here.",
         "data": {
-          "name": "Display name"
+          "name": "Display name",
+          "notification_ip": "HA notification IP",
+          "notification_port": "HA notification port"
         }
       }
     },
