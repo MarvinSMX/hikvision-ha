@@ -119,8 +119,6 @@ class HikvisionAccessCard extends HTMLElement {
         }
         .header-body:hover .header-title { opacity: .75; }
         .header-title {
-          flex: 1;
-          min-width: 0;
           font-size: 1rem;
           font-weight: 600;
           color: var(--primary-text-color);
@@ -128,6 +126,7 @@ class HikvisionAccessCard extends HTMLElement {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          max-width: calc(100% - 16px);
         }
         .status-dot {
           width: 7px;
@@ -135,7 +134,6 @@ class HikvisionAccessCard extends HTMLElement {
           border-radius: 50%;
           background: ${statusColor};
           flex-shrink: 0;
-          flex-grow: 0;
         }
 
         .lock-btn {
@@ -211,6 +209,13 @@ class HikvisionAccessCard extends HTMLElement {
           text-overflow: ellipsis;
         }
         .event-time { font-size: .72rem; color: var(--secondary-text-color); margin-top: 2px; }
+        .event-more {
+          font-size: .75rem;
+          font-weight: 500;
+          color: var(--primary-color);
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
 
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
         .pulsing { animation: pulse 1.2s infinite; }
@@ -271,6 +276,7 @@ class HikvisionAccessCard extends HTMLElement {
             <div class="event-label">${eventState}</div>
             <div class="event-time">${this._fmtTime(evTimeState)}</div>
           </div>
+          <span class="event-more">Mehr &rsaquo;</span>
         </div>
       </ha-card>
     `;
