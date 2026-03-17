@@ -360,9 +360,10 @@ class HikvisionCoordinator:
 
         from .const import REMOTE_CONTROL_PATH  # noqa: PLC0415
 
+        # Namespace required by Hikvision ISAPI (same schema as httpHosts responses)
         xml_body = (
             '<?xml version="1.0" encoding="UTF-8"?>'
-            "<RemoteControlDoor>"
+            '<RemoteControlDoor version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">'
             "<doorNo>1</doorNo>"
             f"<controlCode>{command}</controlCode>"
             "</RemoteControlDoor>"

@@ -55,7 +55,7 @@
         "state": {
           "connected": "Verbunden",
           "disconnected": "Getrennt",
-          "reconnecting": "Verbinde..."
+          "reconnecting": "Verbinde…"
         }
       }
     },
