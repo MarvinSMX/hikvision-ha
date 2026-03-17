@@ -34,8 +34,8 @@ ACCESS_STATUS_DENIED = "denied"
 # The device sends these codes in pushed HTTP notifications.
 EVENT_LABELS: dict[str, str] = {
     "5_75": "Zugang gewährt",
-    "5_22": "Tür geöffnet",
-    "5_21": "Tür geschlossen",
+    "5_21": "Tür geöffnet",
+    "5_22": "Tür geschlossen",
     "3_112": "Fernöffnung",
     "3_80": "Tür geöffnet (Relais)",
     "2_39": "Ereignis erkannt",
@@ -48,8 +48,8 @@ EVENT_LABELS: dict[str, str] = {
 }
 
 # Door state codes (from alertStream subEventType values)
-DOOR_OPEN_CODES: frozenset[str] = frozenset({"5_22", "3_80"})
-DOOR_CLOSE_CODES: frozenset[str] = frozenset({"5_21"})
+DOOR_OPEN_CODES: frozenset[str] = frozenset({"5_21", "3_80"})
+DOOR_CLOSE_CODES: frozenset[str] = frozenset({"5_22"})
 
 # Access outcome codes
 ACCESS_GRANTED_CODES: frozenset[str] = frozenset({"5_75", "3_112"})

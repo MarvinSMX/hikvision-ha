@@ -49,7 +49,7 @@
         }
       },
       "stream_status": {
-        "name": "Stream Status",
+        "name": "Device Status",
         "state": {
           "connected": "Connected",
           "disconnected": "Disconnected",
@@ -59,7 +59,7 @@
     },
     "binary_sensor": {
       "last_event_active": {
-        "name": "Event Active"
+        "name": "Motion Detector"
       },
       "door": {
         "name": "Door"
