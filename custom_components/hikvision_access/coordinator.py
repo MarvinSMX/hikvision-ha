@@ -106,14 +106,37 @@ class HikvisionCoordinator:
         self, hass: HomeAssistant, webhook_id: str, request: Request
     ) -> Response:
         """Receive a push notification from the device."""
+        _LOGGER.debug(
+            "Hikvision [%s]: webhook POST received from %s  Content-Type: %s",
+            self._host,
+            request.remote,
+            request.headers.get("Content-Type", "<none>"),
+        )
         try:
             body = await request.read()
+            _LOGGER.debug(
+                "Hikvision [%s]: webhook body (%d bytes): %s",
+                self._host,
+                len(body),
+                body[:500],
+            )
             content_type = request.headers.get("Content-Type", "")
             events = self._parse_push_body(body, content_type)
+            _LOGGER.debug(
+                "Hikvision [%s]: parsed %d event(s) from webhook",
+                self._host,
+                len(events),
+            )
             for event in events:
                 self._dispatch_event(event)
+                _LOGGER.info(
+                    "Hikvision [%s]: event dispatched — %s (%s)",
+                    self._host,
+                    event.get("event_label"),
+                    event.get("event_code"),
+                )
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("Hikvision webhook handler error: %s", exc)
+            _LOGGER.warning("Hikvision [%s]: webhook handler error: %s", self._host, exc)
 
         return Response(status=200)
 

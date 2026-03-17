@@ -4,12 +4,9 @@ from __future__ import annotations
 import logging
 import secrets
 
-from urllib.parse import urlparse
-
 from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .const import CONF_WEBHOOK_ID, DOMAIN, PLATFORMS
 from .coordinator import HikvisionCoordinator
@@ -58,34 +55,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.start()
 
     # --- Configure device push (best-effort; logged but not fatal) ---
-    # Priority: use get_url() so that a custom domain (e.g. rtoshass.rto.de)
-    # or HTTPS reverse proxy is used when configured.  configure_device handles
-    # both IP addresses and hostnames automatically.  Fall back to local_ip if
-    # get_url() is not available.
-    ha_url: str | None = None
-    try:
-        ha_url = get_url(
-            hass,
-            allow_internal=True,
-            allow_external=False,
-            allow_ip=True,
-            require_ssl=False,
-        )
-    except NoURLAvailableError:
-        if hass.config.api:
-            ip = hass.config.api.local_ip
-            port = hass.config.api.port or 8123
-            ha_url = f"http://{ip}:{port}"
+    # Hikvision devices send HTTP POST to a plain HTTP endpoint on the local
+    # network — they cannot validate HTTPS certificates from reverse proxies
+    # or external domains.  We therefore ALWAYS use the HA local IP + HTTP,
+    # regardless of how HA is accessed from the outside.
+    # This matches every known working reference implementation (e.g.
+    # https://github.com/hab1b/Redsis_Hikvision_HTTP_Listener).
+    if hass.config.api:
+        local_ip = hass.config.api.local_ip
+        local_port = hass.config.api.port or 8123
+        uses_ssl = getattr(hass.config.api, "use_ssl", False)
 
-    if not ha_url:
-        _LOGGER.warning(
-            "Hikvision [%s]: could not determine HA URL — "
-            "device push notification will not be configured automatically",
+        if uses_ssl:
+            _LOGGER.warning(
+                "Hikvision [%s]: HA is running with native SSL on port %d. "
+                "The Hikvision device sends plain HTTP and cannot validate "
+                "self-signed certificates. Configure a reverse proxy that "
+                "accepts HTTP from the device's subnet, or disable native SSL "
+                "and use a reverse proxy for external HTTPS instead.",
+                entry.data.get("host"),
+                local_port,
+            )
+
+        ha_url = f"http://{local_ip}:{local_port}"
+        _LOGGER.info(
+            "Hikvision [%s]: configuring device push → %s/api/webhook/%s",
             entry.data.get("host"),
+            ha_url,
+            webhook_id,
         )
-    else:
         await hass.async_add_executor_job(
             coordinator.configure_device, ha_url, webhook_id
+        )
+    else:
+        _LOGGER.warning(
+            "Hikvision [%s]: could not determine HA local IP — "
+            "device push notification will not be configured automatically. "
+            "Manually configure the device to POST to "
+            "http://<HA-IP>:8123/api/webhook/%s",
+            entry.data.get("host"),
+            webhook_id,
         )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
