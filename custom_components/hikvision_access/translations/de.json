@@ -64,11 +64,5 @@
       "door": {
         "name": "Tür"
       }
-    },
-    "image": {
-      "last_face": {
-        "name": "Letztes Gesichtsbild"
-      }
-    }
   }
 }

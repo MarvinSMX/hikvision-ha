@@ -23,7 +23,6 @@ import ipaddress
 import json
 import logging
 from collections.abc import Callable
-from datetime import datetime as dt
 from typing import Any
 from urllib.parse import urlparse
 
@@ -76,9 +75,6 @@ class HikvisionCoordinator:
         self.door_is_open: bool | None = None
         self.last_access_status: str | None = None
         self.stream_status: str = STREAM_STATUS_DISCONNECTED
-        # Last face image captured at the reader (JPEG bytes or None)
-        self.last_face_image: bytes | None = None
-        self.last_face_image_updated: dt | None = None
 
         self._listeners: list[Callable] = []
 
@@ -119,20 +115,7 @@ class HikvisionCoordinator:
         )
         try:
             body = await request.read()
-            events, face_image = self._parse_push_body(body, content_type)
-
-            # Also check for base64-encoded image embedded in the JSON payload
-            if not face_image and events:
-                face_image = self._extract_base64_image(events[0])
-
-            if face_image:
-                self.last_face_image = face_image
-                self.last_face_image_updated = dt.now()
-                _LOGGER.info(
-                    "Hikvision [%s]: face image received (%d bytes)",
-                    self._host,
-                    len(face_image),
-                )
+            events, _ = self._parse_push_body(body, content_type)
 
             if not events:
                 _LOGGER.warning(
@@ -442,29 +425,6 @@ class HikvisionCoordinator:
                     face_image = img
 
         return events, face_image
-
-    @staticmethod
-    def _extract_base64_image(payload: dict) -> bytes | None:
-        """Look for a base64-encoded face image inside the JSON event payload.
-
-        Hikvision devices with pictureURLType=base64 embed the capture image
-        directly in the AccessControllerEvent JSON under various field names
-        depending on firmware version.
-        """
-        import base64  # noqa: PLC0415
-
-        ace = payload.get("AccessControllerEvent", {})
-        # Known field names across different Hikvision firmware versions
-        for field in ("faceImage", "faceImageBase64", "captureImage", "picture", "picData"):
-            raw = ace.get(field) or payload.get(field)
-            if raw and isinstance(raw, str):
-                try:
-                    data = base64.b64decode(raw)
-                    if data:
-                        return data
-                except Exception:  # noqa: BLE001
-                    pass
-        return None
 
     # ------------------------------------------------------------------
     # Event building
