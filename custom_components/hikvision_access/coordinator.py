@@ -106,37 +106,43 @@ class HikvisionCoordinator:
         self, hass: HomeAssistant, webhook_id: str, request: Request
     ) -> Response:
         """Receive a push notification from the device."""
-        _LOGGER.debug(
-            "Hikvision [%s]: webhook POST received from %s  Content-Type: %s",
+        content_type = request.headers.get("Content-Type", "<none>")
+        _LOGGER.info(
+            "Hikvision [%s]: ▶ webhook POST from %s  Content-Type: %s",
             self._host,
             request.remote,
-            request.headers.get("Content-Type", "<none>"),
+            content_type,
         )
         try:
             body = await request.read()
-            _LOGGER.debug(
-                "Hikvision [%s]: webhook body (%d bytes): %s",
+            # Log raw body so we can see exactly what the device sends.
+            # Shown at WARNING so it's visible even without debug logging.
+            _LOGGER.warning(
+                "Hikvision [%s]: raw body (%d bytes):\n%s",
                 self._host,
                 len(body),
-                body[:500],
+                body.decode("utf-8", errors="replace")[:1000],
             )
-            content_type = request.headers.get("Content-Type", "")
             events = self._parse_push_body(body, content_type)
-            _LOGGER.debug(
-                "Hikvision [%s]: parsed %d event(s) from webhook",
-                self._host,
-                len(events),
-            )
+            if not events:
+                _LOGGER.warning(
+                    "Hikvision [%s]: ⚠ webhook received but 0 events parsed "
+                    "(unexpected body format — see raw body above)",
+                    self._host,
+                )
             for event in events:
                 self._dispatch_event(event)
                 _LOGGER.info(
-                    "Hikvision [%s]: event dispatched — %s (%s)",
+                    "Hikvision [%s]: ✓ event — %s (%s) person=%s",
                     self._host,
                     event.get("event_label"),
                     event.get("event_code"),
+                    event.get("person_name") or "—",
                 )
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("Hikvision [%s]: webhook handler error: %s", self._host, exc)
+            _LOGGER.warning(
+                "Hikvision [%s]: webhook handler error: %s", self._host, exc
+            )
 
         return Response(status=200)
 
