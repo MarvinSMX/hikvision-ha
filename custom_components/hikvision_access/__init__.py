@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import logging
 import secrets
-from pathlib import Path
 
 from homeassistant.components import webhook
-from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -22,29 +20,6 @@ from .coordinator import HikvisionCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-_CARD_URL = "/hikvision_access/hikvision-access-card.js"
-_CARD_FILE = Path(__file__).parent / "www" / "hikvision-access-card.js"
-_CARD_REGISTERED = f"{DOMAIN}_card_registered"
-
-
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Called on HA start — register the Lovelace card resource."""
-    _register_card(hass)
-    return True
-
-
-def _register_card(hass: HomeAssistant) -> None:
-    """Register the bundled Lovelace card as a frontend resource (idempotent)."""
-    if hass.data.get(_CARD_REGISTERED):
-        return
-    try:
-        hass.http.register_static_path(_CARD_URL, str(_CARD_FILE), cache_headers=False)
-        add_extra_js_url(hass, _CARD_URL)
-        hass.data[_CARD_REGISTERED] = True
-        _LOGGER.info("Hikvision Access Card registered at %s", _CARD_URL)
-    except Exception as exc:  # noqa: BLE001
-        _LOGGER.warning("Could not register Hikvision Access Card: %s", exc)
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up from a config entry.
@@ -58,7 +33,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     6. Configure the device to push to our webhook (best-effort)
     """
     hass.data.setdefault(DOMAIN, {})
-    _register_card(hass)  # idempotent — also covers first-install without HA restart
 
     coordinator = HikvisionCoordinator(hass, dict(entry.data))
     hass.data[DOMAIN][entry.entry_id] = coordinator
