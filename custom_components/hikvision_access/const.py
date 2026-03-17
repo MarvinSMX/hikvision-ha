@@ -11,6 +11,8 @@ CONF_PASSWORD = "password"
 CONF_VERIFY_SSL = "verify_ssl"
 CONF_NAME = "name"
 CONF_WEBHOOK_ID = "webhook_id"
+CONF_NOTIFICATION_IP = "notification_ip"
+CONF_NOTIFICATION_PORT = "notification_port"
 
 # API endpoints
 HTTP_HOSTS_PATH = "/ISAPI/Event/notification/httpHosts"

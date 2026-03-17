@@ -8,7 +8,14 @@ from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_WEBHOOK_ID, DOMAIN, PLATFORMS
+from .const import (
+    CONF_NOTIFICATION_IP,
+    CONF_NOTIFICATION_PORT,
+    CONF_WEBHOOK_ID,
+    DOMAIN,
+    PLATFORMS,
+    STREAM_STATUS_CONNECTED,
+)
 from .coordinator import HikvisionCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,12 +37,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = HikvisionCoordinator(hass, dict(entry.data))
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    # --- Ensure a stable webhook_id ---
+    # --- Ensure a short-enough webhook_id ---
+    # Hikvision's <url> field is limited to ~74 characters.
+    # /api/webhook/ = 13 chars → max token = 61 chars.
+    # secrets.token_hex(16) = 32 hex chars → URL = 45 chars (safe).
+    # Regenerate if the saved token is too long (e.g. from a previous version).
+    _MAX_TOKEN = 56  # 56 hex chars → 69-char URL, safely under the device limit
     webhook_id = entry.data.get(CONF_WEBHOOK_ID)
-    if not webhook_id:
-        webhook_id = secrets.token_hex(32)
+    if not webhook_id or len(webhook_id) > _MAX_TOKEN:
+        webhook_id = secrets.token_hex(16)  # 32 hex chars
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, CONF_WEBHOOK_ID: webhook_id}
+        )
+        _LOGGER.info(
+            "Hikvision [%s]: webhook token (re)generated: ...%s",
+            entry.data.get("host"),
+            webhook_id[-8:],
         )
 
     # --- Register webhook ---
@@ -61,38 +78,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # regardless of how HA is accessed from the outside.
     # This matches every known working reference implementation (e.g.
     # https://github.com/hab1b/Redsis_Hikvision_HTTP_Listener).
-    if hass.config.api:
-        local_ip = hass.config.api.local_ip
-        local_port = hass.config.api.port or 8123
-        uses_ssl = getattr(hass.config.api, "use_ssl", False)
+    # Use the notification IP/port from config entry (set during setup wizard).
+    # This is the address the Hikvision device will POST events to.
+    # Falls back to hass.config.api if not stored (older config entries).
+    notification_ip = entry.data.get(CONF_NOTIFICATION_IP) or (
+        hass.config.api.local_ip if hass.config.api else None
+    )
+    notification_port = entry.data.get(CONF_NOTIFICATION_PORT) or (
+        hass.config.api.port if hass.config.api else 8123
+    ) or 8123
 
-        if uses_ssl:
-            _LOGGER.warning(
-                "Hikvision [%s]: HA is running with native SSL on port %d. "
-                "The Hikvision device sends plain HTTP and cannot validate "
-                "self-signed certificates. Configure a reverse proxy that "
-                "accepts HTTP from the device's subnet, or disable native SSL "
-                "and use a reverse proxy for external HTTPS instead.",
-                entry.data.get("host"),
-                local_port,
-            )
-
-        ha_url = f"http://{local_ip}:{local_port}"
+    if notification_ip:
+        ha_url = f"http://{notification_ip}:{notification_port}"
         _LOGGER.info(
             "Hikvision [%s]: configuring device push → %s/api/webhook/%s",
             entry.data.get("host"),
             ha_url,
             webhook_id,
         )
-        await hass.async_add_executor_job(
+        configured = await hass.async_add_executor_job(
             coordinator.configure_device, ha_url, webhook_id
         )
+        # Set status from the event loop — NOT from inside the executor thread
+        if configured:
+            coordinator._set_status(STREAM_STATUS_CONNECTED)  # noqa: SLF001
     else:
         _LOGGER.warning(
-            "Hikvision [%s]: could not determine HA local IP — "
-            "device push notification will not be configured automatically. "
-            "Manually configure the device to POST to "
-            "http://<HA-IP>:8123/api/webhook/%s",
+            "Hikvision [%s]: no notification IP configured — "
+            "device push will not be set up automatically. "
+            "Manually POST to http://<HA-IP>:8123/api/webhook/%s",
             entry.data.get("host"),
             webhook_id,
         )

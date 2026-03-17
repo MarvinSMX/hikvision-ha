@@ -144,7 +144,8 @@ class HikvisionCoordinator:
     # Device configuration — called once from __init__.py on setup
     # ------------------------------------------------------------------
 
-    def configure_device(self, ha_url: str, webhook_id: str) -> None:
+    def configure_device(self, ha_url: str, webhook_id: str) -> bool:
+        """Returns True if the device was successfully configured."""
         """Configure the device to push events to the HA webhook.
 
         Strategy: GET the current httpHosts XML → modify only the target
@@ -179,7 +180,7 @@ class HikvisionCoordinator:
                 _LOGGER.warning(
                     "Hikvision [%s]: GET httpHosts failed: %s", self._host, exc
                 )
-                return
+                return False
 
             # ── 2. Parse XML and update slot 1 ────────────────────────────
             try:
@@ -260,7 +261,7 @@ class HikvisionCoordinator:
                         self._host,
                         _HTTP_HOST_SLOT,
                     )
-                    return
+                    return False
 
                 # Prepend the XML declaration that ET.tostring omits by default
                 modified_xml = (
@@ -274,7 +275,7 @@ class HikvisionCoordinator:
                     self._host,
                     exc,
                 )
-                return
+                return False
 
             # ── 3. PUT modified config ────────────────────────────────────
             try:
@@ -293,20 +294,20 @@ class HikvisionCoordinator:
                         ha_url,
                         webhook_path,
                     )
-                    self._set_status(STREAM_STATUS_CONNECTED)
-                else:
-                    _LOGGER.warning(
-                        "Hikvision [%s]: httpHosts PUT returned HTTP %d. Body: %s",
-                        self._host,
-                        resp.status_code,
-                        resp.text[:400],
-                    )
+                    return True  # caller sets status from event loop
+                _LOGGER.warning(
+                    "Hikvision [%s]: httpHosts PUT returned HTTP %d. Body: %s",
+                    self._host,
+                    resp.status_code,
+                    resp.text[:400],
+                )
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.warning(
                     "Hikvision [%s]: httpHosts PUT request failed: %s",
                     self._host,
                     exc,
                 )
+        return False
 
     # ------------------------------------------------------------------
     # Multipart / JSON body parsing
