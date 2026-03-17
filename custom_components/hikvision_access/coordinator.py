@@ -54,8 +54,8 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 _ISAPI_NS = "http://www.isapi.org/ver20/XMLSchema"
-# Slot used when writing to httpHosts — slot 1 is the first notification host.
-_HTTP_HOST_SLOT = 1
+# Preferred slot for HTTP notification.  The device may reserve slot 1 for
+# EHome (Hikvision's proprietary protocol), so we auto-detect the best slot.
 
 
 class HikvisionCoordinator:
@@ -216,63 +216,84 @@ class HikvisionCoordinator:
                 except ValueError:
                     use_ip = False
 
-                found = False
-                for host_elem in root.findall(f"{nsp}HttpHostNotification"):
-                    id_elem = host_elem.find(f"{nsp}id")
-                    if id_elem is not None and id_elem.text == str(_HTTP_HOST_SLOT):
-                        _set(host_elem, "url", webhook_path)
-                        _set(host_elem, "portNo", str(port))
-                        _set(host_elem, "protocolType", protocol)
+                all_slots = root.findall(f"{nsp}HttpHostNotification")
 
-                        if use_ip:
-                            _set(host_elem, "addressingFormatType", "ipaddress")
-                            _set(host_elem, "ipAddress", ip_or_host)
-                            # Clear hostName if it exists
-                            hn = host_elem.find(f"{nsp}hostName")
-                            if hn is not None:
-                                hn.text = ""
-                        else:
-                            _set(host_elem, "addressingFormatType", "hostname")
-                            # Reuse <ipAddress> field as <hostName> if device
-                            # supports it; otherwise insert a <hostName> node.
-                            hn = host_elem.find(f"{nsp}hostName")
-                            if hn is None:
-                                at_elem = host_elem.find(
-                                    f"{nsp}addressingFormatType"
-                                )
-                                idx = (
-                                    list(host_elem).index(at_elem) + 1
-                                    if at_elem is not None
-                                    else 0
-                                )
-                                hn = ET.Element(f"{nsp}hostName")
-                                host_elem.insert(idx, hn)
-                            hn.text = ip_or_host
-                            _set(host_elem, "ipAddress", "0.0.0.0")
+                def _best_slot() -> ET.Element | None:
+                    """Pick the slot to write our webhook config into.
 
-                        # Ensure SubscribeEvent / eventMode is present
-                        sub = host_elem.find(f"{nsp}SubscribeEvent")
-                        if sub is None:
-                            sub = ET.SubElement(host_elem, f"{nsp}SubscribeEvent")
-                        em = sub.find(f"{nsp}eventMode")
-                        if em is None:
-                            em = ET.SubElement(sub, f"{nsp}eventMode")
-                        em.text = "all"
-                        found = True
-                        break
+                    Priority:
+                    1. Slot that already has our webhook URL (update in-place)
+                    2. First HTTP slot that isn't EHome
+                    3. Any slot that isn't EHome
+                    """
+                    http_candidate: ET.Element | None = None
+                    any_candidate: ET.Element | None = None
+                    for s in all_slots:
+                        proto = (s.findtext(f"{nsp}protocolType") or "").upper()
+                        url_text = s.findtext(f"{nsp}url") or ""
+                        if webhook_path in url_text:
+                            return s  # already our slot
+                        if proto in ("HTTP", "HTTPS") and http_candidate is None:
+                            http_candidate = s
+                        if proto != "EHOME" and any_candidate is None:
+                            any_candidate = s
+                    return http_candidate or any_candidate
 
-                if not found:
+                target = _best_slot()
+                if target is None:
                     _LOGGER.warning(
-                        "Hikvision [%s]: httpHosts slot %d not found in device response",
-                        self._host,
-                        _HTTP_HOST_SLOT,
+                        "Hikvision [%s]: no suitable httpHosts slot found", self._host
                     )
                     return False
+
+                slot_id = (target.findtext(f"{nsp}id") or "?")
+                _LOGGER.info(
+                    "Hikvision [%s]: using httpHosts slot %s for webhook",
+                    self._host,
+                    slot_id,
+                )
+
+                _set(target, "url", webhook_path)
+                _set(target, "portNo", str(port))
+                _set(target, "protocolType", protocol)
+
+                if use_ip:
+                    _set(target, "addressingFormatType", "ipaddress")
+                    _set(target, "ipAddress", ip_or_host)
+                    hn = target.find(f"{nsp}hostName")
+                    if hn is not None:
+                        hn.text = ""
+                else:
+                    _set(target, "addressingFormatType", "hostname")
+                    hn = target.find(f"{nsp}hostName")
+                    if hn is None:
+                        at_elem = target.find(f"{nsp}addressingFormatType")
+                        idx = (
+                            list(target).index(at_elem) + 1
+                            if at_elem is not None
+                            else 0
+                        )
+                        hn = ET.Element(f"{nsp}hostName")
+                        target.insert(idx, hn)
+                    hn.text = ip_or_host
+                    _set(target, "ipAddress", "0.0.0.0")
+
+                # Ensure SubscribeEvent / eventMode is present
+                sub = target.find(f"{nsp}SubscribeEvent")
+                if sub is None:
+                    sub = ET.SubElement(target, f"{nsp}SubscribeEvent")
+                em = sub.find(f"{nsp}eventMode")
+                if em is None:
+                    em = ET.SubElement(sub, f"{nsp}eventMode")
+                em.text = "all"
 
                 # Prepend the XML declaration that ET.tostring omits by default
                 modified_xml = (
                     '<?xml version="1.0" encoding="UTF-8"?>'
                     + ET.tostring(root, encoding="unicode")
+                )
+                _LOGGER.warning(
+                    "Hikvision [%s]: PUT XML body:\n%s", self._host, modified_xml
                 )
 
             except ET.ParseError as exc:
