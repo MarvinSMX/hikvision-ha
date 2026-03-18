@@ -23,6 +23,7 @@ import ipaddress
 import json
 import logging
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -77,6 +78,14 @@ class HikvisionCoordinator:
         self.stream_status: str = STREAM_STATUS_DISCONNECTED
 
         self._listeners: list[Callable] = []
+
+        # Ignore historical replay events older than 60 s before startup
+        self._min_event_time: datetime = (
+            datetime.now(timezone.utc) - timedelta(seconds=60)
+        )
+
+        # Last JPEG snapshot (fetched on access events)
+        self.last_snapshot: bytes | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle (trivial for push — no polling timer to manage)
@@ -347,6 +356,47 @@ class HikvisionCoordinator:
         return False
 
     # ------------------------------------------------------------------
+    # Snapshot
+    # ------------------------------------------------------------------
+
+    async def _async_fetch_snapshot(self) -> None:
+        """Fetch a JPEG snapshot asynchronously and notify listeners."""
+        data = await self.hass.async_add_executor_job(self._fetch_snapshot_sync)
+        if data:
+            self.last_snapshot = data
+            self._notify_listeners()
+
+    def _fetch_snapshot_sync(self) -> bytes | None:
+        """Blocking ISAPI snapshot fetch — call via executor only."""
+        import warnings  # noqa: PLC0415
+
+        from .const import SNAPSHOT_PATH  # noqa: PLC0415
+
+        url = f"https://{self._host}{SNAPSHOT_PATH}"
+        auth = HTTPDigestAuth(self._username, self._password)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                resp = requests.get(
+                    url,
+                    auth=auth,
+                    verify=self._verify_ssl,
+                    timeout=5,
+                )
+                if resp.status_code == 200 and resp.content:
+                    _LOGGER.debug(
+                        "Hikvision [%s]: snapshot fetched (%d bytes)",
+                        self._host, len(resp.content),
+                    )
+                    return resp.content
+                _LOGGER.debug(
+                    "Hikvision [%s]: snapshot HTTP %d", self._host, resp.status_code
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("Hikvision [%s]: snapshot failed: %s", self._host, exc)
+        return None
+
+    # ------------------------------------------------------------------
     # Remote door control
     # ------------------------------------------------------------------
 
@@ -513,6 +563,23 @@ class HikvisionCoordinator:
     def _dispatch_event(self, payload: dict) -> None:
         """Update state from an alertStream payload dict and notify listeners."""
         event = self._build_event(payload)
+
+        # Filter historical replay: ignore events older than 60 s before startup
+        ts_str = event.get("timestamp")
+        if ts_str:
+            try:
+                ts = datetime.fromisoformat(ts_str)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts < self._min_event_time:
+                    _LOGGER.debug(
+                        "Hikvision [%s]: skipping historical event %s (%s)",
+                        self._host, event["event_code"], ts_str,
+                    )
+                    return
+            except ValueError:
+                pass  # unparseable timestamp — let it through
+
         event_code = event["event_code"]
 
         if event_code in ACCESS_GRANTED_CODES:
@@ -530,6 +597,10 @@ class HikvisionCoordinator:
         self.hass.bus.async_fire(EVENT_TYPE, event)
         self._set_status(STREAM_STATUS_CONNECTED)
         self._notify_listeners()
+
+        # Fetch snapshot on every access event (granted or denied)
+        if event_code in ACCESS_GRANTED_CODES | ACCESS_DENIED_CODES:
+            self.hass.async_create_task(self._async_fetch_snapshot())
 
     # ------------------------------------------------------------------
     # Helpers

@@ -71,6 +71,11 @@
       "access_lock": {
         "name": "Zugangssperre"
       }
+    },
+    "camera": {
+      "snapshot": {
+        "name": "Letzter Snapshot"
+      }
     }
   }
 }

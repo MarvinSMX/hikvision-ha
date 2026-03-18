@@ -3,7 +3,7 @@
 DOMAIN = "hikvision_access"
 EVENT_TYPE = "hikvision_access_event"
 
-PLATFORMS = ["sensor", "binary_sensor", "switch"]
+PLATFORMS = ["sensor", "binary_sensor", "switch", "camera"]
 
 CONF_HOST = "host"
 CONF_USERNAME = "username"
@@ -19,6 +19,7 @@ HTTP_HOSTS_PATH = "/ISAPI/Event/notification/httpHosts"
 DEVICE_INFO_PATH = "/ISAPI/System/deviceInfo"
 ACS_CAPS_PATH = "/ISAPI/AccessControl/GetAcsEvent/capabilities"
 REMOTE_CONTROL_PATH = "/ISAPI/AccessControl/RemoteControl/door/1"
+SNAPSHOT_PATH = "/ISAPI/Streaming/channels/101/picture"
 
 # Remote control commands
 CMD_UNLOCK = "close"        # Tür schließen → Normalbetrieb (Gesichtserkennung aktiv)
