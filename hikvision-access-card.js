@@ -32,7 +32,29 @@ class HikvisionAccessCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._config) return;
+    const fp = this._fingerprint(this._config.device);
+    if (fp === this._lastFp) return;
+    this._lastFp = fp;
     this._render();
+  }
+
+  _fingerprint(p) {
+    const ids = [
+      `binary_sensor.${p}_tur`,
+      `binary_sensor.${p}_bewegungsmelder`,
+      `sensor.${p}_letzte_person`,
+      `sensor.${p}_letztes_event`,
+      `sensor.${p}_zeit_des_letzten_events`,
+      `sensor.${p}_zugang`,
+      `sensor.${p}_geratestatus`,
+      `switch.${p}_zugangssperre`,
+      `camera.${p}_letzter_snapshot`,
+    ];
+    return ids.map((id) => {
+      const s = this._hass?.states?.[id];
+      return s ? `${s.state}|${s.attributes?.entity_picture ?? ""}` : "";
+    }).join("\x00");
   }
 
   _s(entityId) {

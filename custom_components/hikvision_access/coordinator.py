@@ -86,6 +86,7 @@ class HikvisionCoordinator:
 
         # Last JPEG snapshot (fetched on access events)
         self.last_snapshot: bytes | None = None
+        self._snapshot_in_progress: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle (trivial for push — no polling timer to manage)
@@ -360,11 +361,21 @@ class HikvisionCoordinator:
     # ------------------------------------------------------------------
 
     async def _async_fetch_snapshot(self) -> None:
-        """Fetch a JPEG snapshot asynchronously and notify listeners."""
-        data = await self.hass.async_add_executor_job(self._fetch_snapshot_sync)
-        if data:
-            self.last_snapshot = data
-            self._notify_listeners()
+        """Fetch a JPEG snapshot asynchronously and notify listeners.
+
+        Skipped if a fetch is already running — prevents snapshot storms
+        during the initial event-catchup replay from the device.
+        """
+        if self._snapshot_in_progress:
+            return
+        self._snapshot_in_progress = True
+        try:
+            data = await self.hass.async_add_executor_job(self._fetch_snapshot_sync)
+            if data:
+                self.last_snapshot = data
+                self._notify_listeners()
+        finally:
+            self._snapshot_in_progress = False
 
     def _fetch_snapshot_sync(self) -> bytes | None:
         """Blocking ISAPI snapshot fetch — call via executor only."""
