@@ -93,6 +93,11 @@ class HikvisionAccessCard extends HTMLElement {
     const accessLabel = granted   ? "Gewährt"    : denied ? "Verweigert" : "—";
     const accessIcon  = granted   ? "mdi:check-circle" : denied ? "mdi:close-circle" : "mdi:minus-circle-outline";
 
+    // Camera snapshot
+    const camEntityId   = `camera.${p}_letzter_snapshot`;
+    const camState      = this._s(camEntityId);
+    const camPicture    = camState?.attributes?.entity_picture ?? null;
+
     // Mushroom-style shape colors (icon bg = color at 15% opacity via hex alpha)
     const doorShapeBg   = doorOpen  ? "#FF980026" : "#4CAF5026";
     const motionShapeBg = motionActive ? "#FF980026" : "rgba(var(--rgb-primary-text-color,0,0,0),.06)";
@@ -173,6 +178,46 @@ class HikvisionAccessCard extends HTMLElement {
         .lock-btn:hover { filter: brightness(.9); }
         .lock-btn ha-icon { --mdc-icon-size: 20px; color: ${lockColor}; }
 
+        /* ── Camera snapshot ── */
+        .cam-wrap {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 16 / 9;
+          border-radius: var(--ha-card-border-radius, 10px);
+          overflow: hidden;
+          background: var(--secondary-background-color, rgba(0,0,0,.06));
+          margin-bottom: 8px;
+          cursor: pointer;
+        }
+        .cam-wrap img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+          transition: opacity .3s;
+        }
+        .cam-placeholder {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--secondary-text-color);
+          --mdc-icon-size: 36px;
+        }
+        .cam-badge {
+          position: absolute;
+          bottom: 8px;
+          right: 8px;
+          background: rgba(0,0,0,.55);
+          color: #fff;
+          font-size: 11px;
+          font-weight: 500;
+          padding: 2px 7px;
+          border-radius: 99px;
+          backdrop-filter: blur(4px);
+        }
+
         /* ── Grid ── */
         .grid {
           display: grid;
@@ -233,6 +278,17 @@ class HikvisionAccessCard extends HTMLElement {
           <button class="lock-btn" id="lock-toggle" title="${locked ? "Entsperren" : "Sperren"}">
             <ha-icon icon="${locked ? "mdi:lock" : "mdi:lock-open-variant"}"></ha-icon>
           </button>
+        </div>
+
+        <!-- Camera snapshot -->
+        <div class="cam-wrap" id="cam-wrap">
+          ${camPicture
+            ? `<img src="${camPicture}" alt="Snapshot">
+               <span class="cam-badge">${this._fmtTime(evTimeState)}</span>`
+            : `<div class="cam-placeholder">
+                 <ha-icon icon="mdi:camera-off"></ha-icon>
+               </div>`
+          }
         </div>
 
         <!-- 2×2 Grid -->
@@ -316,6 +372,14 @@ class HikvisionAccessCard extends HTMLElement {
     if (headerBody) {
       headerBody.addEventListener("click", () =>
         this._moreInfo(`sensor.${p}_geratestatus`)
+      );
+    }
+
+    // Kamera-Bild → more-info Camera
+    const camWrap = this.shadowRoot.querySelector("#cam-wrap");
+    if (camWrap) {
+      camWrap.addEventListener("click", () =>
+        this._moreInfo(`camera.${p}_letzter_snapshot`)
       );
     }
 
