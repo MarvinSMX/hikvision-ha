@@ -24,12 +24,17 @@ async def async_setup_entry(
 
 
 class HikvisionSnapshotCamera(Camera):
-    """Zeigt den letzten JPEG-Snapshot bei Zugang gewährt/verweigert."""
+    """Kamera-Entity für Hikvision Face Terminals.
+
+    - Snapshot-Modus: liefert das zuletzt bei einem Event gecachte JPEG.
+    - Live-Modus (via HA Camera-Proxy-Stream): async_camera_image holt ein
+      frisches Bild direkt vom Gerät — Credentials verlassen HA dabei nie.
+    """
 
     _attr_has_entity_name = True
     _attr_translation_key = "snapshot"
     _attr_icon = "mdi:camera"
-    _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_supported_features = CameraEntityFeature(0)
     _attr_is_streaming = False
     _attr_brand = "Hikvision"
 
@@ -55,11 +60,16 @@ class HikvisionSnapshotCamera(Camera):
     def available(self) -> bool:
         return self._coordinator.last_snapshot is not None
 
-    async def stream_source(self) -> str | None:
-        """RTSP-URL für den Live-Stream."""
-        return self._coordinator.rtsp_url
-
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
+        """Holt ein frisches JPEG vom Gerät (via HA-Proxy, keine URL mit Credentials).
+
+        Fällt auf das gecachte last_snapshot zurück wenn der Fetch fehlschlägt.
+        """
+        fresh = await self.hass.async_add_executor_job(
+            self._coordinator.fetch_snapshot_sync
+        )
+        if fresh:
+            return fresh
         return self._coordinator.last_snapshot

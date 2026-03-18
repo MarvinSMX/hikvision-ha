@@ -90,13 +90,6 @@ class HikvisionCoordinator:
         self.last_snapshot: bytes | None = None
         self._snapshot_in_progress: bool = False
 
-    @property
-    def rtsp_url(self) -> str:
-        """RTSP-Stream-URL des Gerätes (Hauptkanal)."""
-        return (
-            f"rtsp://{self._username}:{self._password}"
-            f"@{self._host}/Streaming/Channels/101"
-        )
 
     # ------------------------------------------------------------------
     # Lifecycle (trivial for push — no polling timer to manage)
@@ -380,14 +373,14 @@ class HikvisionCoordinator:
             return
         self._snapshot_in_progress = True
         try:
-            data = await self.hass.async_add_executor_job(self._fetch_snapshot_sync)
+            data = await self.hass.async_add_executor_job(self.fetch_snapshot_sync)
             if data:
                 self.last_snapshot = data
                 self._notify_listeners()
         finally:
             self._snapshot_in_progress = False
 
-    def _fetch_snapshot_sync(self) -> bytes | None:
+    def fetch_snapshot_sync(self) -> bytes | None:
         """Blocking ISAPI snapshot fetch — call via executor only."""
         import warnings  # noqa: PLC0415
 
