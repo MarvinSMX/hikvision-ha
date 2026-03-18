@@ -93,139 +93,141 @@ class HikvisionAccessCard extends HTMLElement {
     const accessLabel = granted   ? "Gewährt"    : denied ? "Verweigert" : "—";
     const accessIcon  = granted   ? "mdi:check-circle" : denied ? "mdi:close-circle" : "mdi:minus-circle-outline";
 
-    const lockColor = locked ? "var(--error-color,#F44336)" : "var(--success-color,#4CAF50)";
+    // Mushroom-style shape colors (icon bg = color at 15% opacity via hex alpha)
+    const doorShapeBg   = doorOpen  ? "#FF980026" : "#4CAF5026";
+    const motionShapeBg = motionActive ? "#FF980026" : "rgba(var(--rgb-primary-text-color,0,0,0),.06)";
+    const personShapeBg = "rgba(var(--rgb-primary-color,3,169,244),.15)";
+    const accessShapeBg = granted ? "#4CAF5026" : denied ? "#F4433626" : "rgba(var(--rgb-primary-text-color,0,0,0),.06)";
+    const lockShapeBg   = locked  ? "#F4433618" : "#4CAF5018";
+    const lockColor     = locked  ? "var(--error-color,#F44336)" : "var(--success-color,#4CAF50)";
 
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        ha-card { padding: 0; overflow: hidden; }
+        ha-card {
+          padding: 12px 12px 8px;
+          --mush-icon-size: var(--mushroom-icon-size, 38px);
+        }
 
         /* ── Header ── */
         .header {
           display: flex;
           align-items: center;
-          gap: 12px;
-          padding: 14px 16px 12px;
-          border-bottom: 1px solid var(--divider-color);
+          gap: 10px;
+          margin-bottom: 12px;
         }
-        .header-icon { --mdc-icon-size: 22px; color: var(--primary-color); flex-shrink: 0; }
-        .header-body {
+        .shape {
+          width: var(--mush-icon-size);
+          height: var(--mush-icon-size);
+          border-radius: var(--mushroom-shape-border-radius, 50%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .shape ha-icon { --mdc-icon-size: 20px; }
+
+        .header-info {
           flex: 1;
           min-width: 0;
           cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 7px;
         }
-        .header-body:hover .header-title { opacity: .75; }
-        .header-title {
-          font-size: 1rem;
-          font-weight: 600;
+        .header-info:hover .primary { opacity: .7; }
+        .primary {
+          font-size: var(--mushroom-card-primary-font-size, 14px);
+          font-weight: var(--mushroom-card-primary-font-weight, 600);
           color: var(--primary-text-color);
-          transition: opacity .15s;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          max-width: calc(100% - 16px);
+          transition: opacity .15s;
         }
         .status-dot {
-          width: 7px;
-          height: 7px;
+          width: 6px; height: 6px;
           border-radius: 50%;
           background: ${statusColor};
           flex-shrink: 0;
         }
+        .secondary {
+          font-size: var(--mushroom-card-secondary-font-size, 12px);
+          font-weight: var(--mushroom-card-secondary-font-weight, 400);
+          color: var(--secondary-text-color);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
 
         .lock-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 38px;
-          height: 38px;
-          border-radius: 50%;
+          width: var(--mush-icon-size);
+          height: var(--mush-icon-size);
+          border-radius: var(--mushroom-shape-border-radius, 50%);
           border: none;
-          background: ${lockColor}18;
-          cursor: pointer;
-          flex-shrink: 0;
+          background: ${lockShapeBg};
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer; flex-shrink: 0;
           transition: background .2s;
         }
-        .lock-btn:hover { background: ${lockColor}30; }
+        .lock-btn:hover { filter: brightness(.9); }
         .lock-btn ha-icon { --mdc-icon-size: 20px; color: ${lockColor}; }
 
         /* ── Grid ── */
         .grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 1px;
-          background: var(--divider-color);
-          border-bottom: 1px solid var(--divider-color);
+          gap: 8px;
+          margin-bottom: 8px;
         }
         .tile {
-          background: var(--card-background-color);
-          padding: 13px 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          cursor: pointer;
-          transition: background .15s;
-        }
-        .tile:hover { background: var(--secondary-background-color); }
-        .tile-label {
-          font-size: 0.68rem;
-          text-transform: uppercase;
-          letter-spacing: .07em;
-          color: var(--secondary-text-color);
-          font-weight: 500;
-        }
-        .tile-value {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: .92rem;
-          font-weight: 600;
+          gap: 10px;
+          padding: 10px 10px;
+          border-radius: var(--ha-card-border-radius, 10px);
+          background: var(--secondary-background-color, rgba(0,0,0,.04));
+          cursor: pointer;
+          transition: filter .15s;
           min-width: 0;
         }
-        .tile-value ha-icon { --mdc-icon-size: 18px; flex-shrink: 0; }
-        .tile-value span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tile:hover { filter: brightness(.95); }
+        .tile-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 
-        /* ── Event row ── */
+        /* ── History chip ── */
         .event-row {
           display: flex;
           align-items: center;
-          gap: 12px;
-          padding: 11px 16px;
+          gap: 8px;
+          padding: 8px 10px;
+          border-radius: var(--ha-card-border-radius, 10px);
+          background: var(--secondary-background-color, rgba(0,0,0,.04));
           cursor: pointer;
-          transition: background .15s;
+          transition: filter .15s;
         }
-        .event-row:hover { background: var(--secondary-background-color); }
-        .event-icon { --mdc-icon-size: 18px; color: var(--secondary-text-color); flex-shrink: 0; }
+        .event-row:hover { filter: brightness(.95); }
+        .event-icon { --mdc-icon-size: 16px; color: var(--secondary-text-color); flex-shrink: 0; }
         .event-info { flex: 1; min-width: 0; }
-        .event-label {
-          font-size: .85rem;
-          font-weight: 500;
-          color: var(--primary-text-color);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .event-time { font-size: .72rem; color: var(--secondary-text-color); margin-top: 2px; }
         .event-more {
-          font-size: .75rem;
+          font-size: 11px;
           font-weight: 500;
           color: var(--primary-color);
           white-space: nowrap;
           flex-shrink: 0;
         }
 
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
         .pulsing { animation: pulse 1.2s infinite; }
       </style>
 
       <ha-card>
+        <!-- Header -->
         <div class="header">
-          <ha-icon class="header-icon" icon="mdi:shield-account"></ha-icon>
-          <div class="header-body">
-            <span class="header-title">${title}</span>
+          <div class="shape" style="background:rgba(var(--rgb-primary-color,3,169,244),.15)">
+            <ha-icon icon="mdi:shield-account" style="color:var(--primary-color)"></ha-icon>
+          </div>
+          <div class="header-info">
+            <span class="primary">${title}</span>
             <span class="status-dot" title="${connected ? "Online" : "Offline"}"></span>
           </div>
           <button class="lock-btn" id="lock-toggle" title="${locked ? "Entsperren" : "Sperren"}">
@@ -233,48 +235,61 @@ class HikvisionAccessCard extends HTMLElement {
           </button>
         </div>
 
+        <!-- 2×2 Grid -->
         <div class="grid">
           <div class="tile" data-entity="binary_sensor.${p}_tur">
-            <div class="tile-label">Tür</div>
-            <div class="tile-value" style="color:${doorColor}">
-              <ha-icon icon="${doorIcon}"></ha-icon>
-              <span>${doorLabel}</span>
+            <div class="shape" style="background:${doorShapeBg}">
+              <ha-icon icon="${doorIcon}" style="color:${doorColor}"></ha-icon>
+            </div>
+            <div class="tile-text">
+              <span class="secondary">Tür</span>
+              <span class="primary" style="color:${doorColor}">${doorLabel}</span>
             </div>
           </div>
 
           <div class="tile" data-entity="binary_sensor.${p}_bewegungsmelder">
-            <div class="tile-label">Aktivität</div>
-            <div class="tile-value" style="color:${motionActive ? "var(--warning-color,#FF9800)" : "var(--secondary-text-color)"}">
+            <div class="shape" style="background:${motionShapeBg}">
               <ha-icon
                 icon="${motionActive ? "mdi:motion-sensor" : "mdi:motion-sensor-off"}"
+                style="color:${motionActive ? "var(--warning-color,#FF9800)" : "var(--secondary-text-color)"}"
                 class="${motionActive ? "pulsing" : ""}">
               </ha-icon>
-              <span>${motionActive ? "Aktiv" : "Ruhig"}</span>
+            </div>
+            <div class="tile-text">
+              <span class="secondary">Aktivität</span>
+              <span class="primary" style="color:${motionActive ? "var(--warning-color,#FF9800)" : "var(--primary-text-color)"}">
+                ${motionActive ? "Aktiv" : "Ruhig"}
+              </span>
             </div>
           </div>
 
           <div class="tile" data-entity="sensor.${p}_letzte_person">
-            <div class="tile-label">Letzte Person</div>
-            <div class="tile-value" style="color:var(--primary-text-color)">
+            <div class="shape" style="background:${personShapeBg}">
               <ha-icon icon="mdi:account" style="color:var(--primary-color)"></ha-icon>
-              <span>${personState}</span>
+            </div>
+            <div class="tile-text" style="min-width:0">
+              <span class="secondary">Letzte Person</span>
+              <span class="primary" style="overflow:hidden;text-overflow:ellipsis">${personState}</span>
             </div>
           </div>
 
           <div class="tile" data-entity="sensor.${p}_zugang">
-            <div class="tile-label">Zugang</div>
-            <div class="tile-value" style="color:${accessColor}">
-              <ha-icon icon="${accessIcon}"></ha-icon>
-              <span>${accessLabel}</span>
+            <div class="shape" style="background:${accessShapeBg}">
+              <ha-icon icon="${accessIcon}" style="color:${accessColor}"></ha-icon>
+            </div>
+            <div class="tile-text">
+              <span class="secondary">Zugang</span>
+              <span class="primary" style="color:${accessColor}">${accessLabel}</span>
             </div>
           </div>
         </div>
 
+        <!-- History -->
         <div class="event-row">
           <ha-icon class="event-icon" icon="mdi:history"></ha-icon>
           <div class="event-info">
-            <div class="event-label">${eventState}</div>
-            <div class="event-time">${this._fmtTime(evTimeState)}</div>
+            <span class="secondary" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${eventState}</span>
+            <span class="secondary" style="opacity:.7">${this._fmtTime(evTimeState)}</span>
           </div>
           <span class="event-more">Mehr &rsaquo;</span>
         </div>
