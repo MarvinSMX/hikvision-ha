@@ -1,5 +1,9 @@
 # Raw device data / logs
-data
+data/
+www/
+
+# Card repo is a separate repository
+card-repo/
 
 # Python
 __pycache__/
