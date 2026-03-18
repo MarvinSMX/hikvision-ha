@@ -611,8 +611,8 @@ class HikvisionCoordinator:
         self._set_status(STREAM_STATUS_CONNECTED)
         self._notify_listeners()
 
-        # Fetch snapshot on every access event (granted or denied)
-        if self._enable_snapshots and event_code in ACCESS_GRANTED_CODES | ACCESS_DENIED_CODES:
+        # Fetch snapshot on every activity (any incoming event)
+        if self._enable_snapshots:
             self.hass.async_create_task(self._async_fetch_snapshot())
 
     # ------------------------------------------------------------------
