@@ -17,7 +17,8 @@
         "data": {
           "name": "Display name",
           "notification_ip": "HA notification IP",
-          "notification_port": "HA notification port"
+          "notification_port": "HA notification port",
+          "enable_snapshots": "Enable snapshots"
         }
       }
     },

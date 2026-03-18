@@ -13,6 +13,7 @@ CONF_NAME = "name"
 CONF_WEBHOOK_ID = "webhook_id"
 CONF_NOTIFICATION_IP = "notification_ip"
 CONF_NOTIFICATION_PORT = "notification_port"
+CONF_ENABLE_SNAPSHOTS = "enable_snapshots"
 
 # API endpoints
 HTTP_HOSTS_PATH = "/ISAPI/Event/notification/httpHosts"

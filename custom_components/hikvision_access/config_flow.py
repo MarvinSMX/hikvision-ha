@@ -21,6 +21,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     ACS_CAPS_PATH,
+    CONF_ENABLE_SNAPSHOTS,
     CONF_HOST,
     CONF_NAME,
     CONF_NOTIFICATION_IP,
@@ -167,6 +168,7 @@ class HikvisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_NOTIFICATION_PORT: int(
                     user_input.get(CONF_NOTIFICATION_PORT, self._ha_local_port)
                 ),
+                CONF_ENABLE_SNAPSHOTS: user_input.get(CONF_ENABLE_SNAPSHOTS, True),
             }
             return self.async_create_entry(title=name, data=entry_data)
 
@@ -176,14 +178,13 @@ class HikvisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_NOTIFICATION_IP,
                     default=self._ha_local_ip,
-                    description={
-                        "suggested_value": self._ha_local_ip
-                    },
+                    description={"suggested_value": self._ha_local_ip},
                 ): str,
                 vol.Required(
                     CONF_NOTIFICATION_PORT,
                     default=self._ha_local_port,
                 ): int,
+                vol.Optional(CONF_ENABLE_SNAPSHOTS, default=True): bool,
             }
         )
 

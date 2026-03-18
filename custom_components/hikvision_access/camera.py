@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import CONF_ENABLE_SNAPSHOTS, DOMAIN
 from .coordinator import HikvisionCoordinator
 
 
@@ -16,6 +16,8 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    if not entry.data.get(CONF_ENABLE_SNAPSHOTS, True):
+        return
     coordinator: HikvisionCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([HikvisionSnapshotCamera(coordinator, entry)])
 

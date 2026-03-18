@@ -38,6 +38,7 @@ from .const import (
     ACCESS_GRANTED_CODES,
     ACCESS_STATUS_DENIED,
     ACCESS_STATUS_GRANTED,
+    CONF_ENABLE_SNAPSHOTS,
     CONF_HOST,
     CONF_NAME,
     CONF_PASSWORD,
@@ -69,6 +70,7 @@ class HikvisionCoordinator:
         self._password: str = config[CONF_PASSWORD]
         self._verify_ssl: bool = config.get(CONF_VERIFY_SSL, False)
         self.name: str = config.get(CONF_NAME, self._host)
+        self._enable_snapshots: bool = config.get(CONF_ENABLE_SNAPSHOTS, True)
 
         # Public state — read by sensor / binary_sensor / image entities
         self.last_event: dict[str, Any] | None = None
@@ -610,7 +612,7 @@ class HikvisionCoordinator:
         self._notify_listeners()
 
         # Fetch snapshot on every access event (granted or denied)
-        if event_code in ACCESS_GRANTED_CODES | ACCESS_DENIED_CODES:
+        if self._enable_snapshots and event_code in ACCESS_GRANTED_CODES | ACCESS_DENIED_CODES:
             self.hass.async_create_task(self._async_fetch_snapshot())
 
     # ------------------------------------------------------------------

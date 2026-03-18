@@ -17,7 +17,8 @@
         "data": {
           "name": "Anzeigename",
           "notification_ip": "HA-Benachrichtigungs-IP",
-          "notification_port": "HA-Benachrichtigungs-Port"
+          "notification_port": "HA-Benachrichtigungs-Port",
+          "enable_snapshots": "Snapshots aktivieren"
         }
       }
     },
