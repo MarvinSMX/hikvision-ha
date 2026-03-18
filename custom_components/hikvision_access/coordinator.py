@@ -72,6 +72,14 @@ class HikvisionCoordinator:
         self.name: str = config.get(CONF_NAME, self._host)
         self._enable_snapshots: bool = config.get(CONF_ENABLE_SNAPSHOTS, True)
 
+    @property
+    def rtsp_url(self) -> str:
+        """RTSP-Stream-URL des Gerätes (Hauptkanal)."""
+        return (
+            f"rtsp://{self._username}:{self._password}"
+            f"@{self._host}/Streaming/Channels/101"
+        )
+
         # Public state — read by sensor / binary_sensor / image entities
         self.last_event: dict[str, Any] | None = None
         self.last_person_event: dict[str, Any] | None = None

@@ -29,7 +29,7 @@ class HikvisionSnapshotCamera(Camera):
     _attr_has_entity_name = True
     _attr_translation_key = "snapshot"
     _attr_icon = "mdi:camera"
-    _attr_supported_features = CameraEntityFeature(0)
+    _attr_supported_features = CameraEntityFeature.STREAM
     _attr_is_streaming = False
     _attr_brand = "Hikvision"
 
@@ -54,6 +54,10 @@ class HikvisionSnapshotCamera(Camera):
     @property
     def available(self) -> bool:
         return self._coordinator.last_snapshot is not None
+
+    async def stream_source(self) -> str | None:
+        """RTSP-URL für den Live-Stream."""
+        return self._coordinator.rtsp_url
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
