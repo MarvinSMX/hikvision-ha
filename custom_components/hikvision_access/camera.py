@@ -16,7 +16,8 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    if not entry.data.get(CONF_ENABLE_SNAPSHOTS, True):
+    merged = {**entry.data, **entry.options}
+    if not merged.get(CONF_ENABLE_SNAPSHOTS, True):
         return
     coordinator: HikvisionCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([HikvisionSnapshotCamera(coordinator, entry)])

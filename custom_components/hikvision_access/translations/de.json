@@ -1,4 +1,14 @@
 {
+  "options": {
+    "step": {
+      "init": {
+        "title": "Optionen",
+        "data": {
+          "enable_snapshots": "Snapshots aktivieren"
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {

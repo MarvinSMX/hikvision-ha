@@ -34,7 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     hass.data.setdefault(DOMAIN, {})
 
-    coordinator = HikvisionCoordinator(hass, dict(entry.data))
+    coordinator = HikvisionCoordinator(hass, {**entry.data, **entry.options})
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # --- Ensure a short-enough webhook_id ---
