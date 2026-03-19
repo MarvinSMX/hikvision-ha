@@ -2,8 +2,9 @@
 data/
 www/
 
-# Card repo is a separate repository
+# Card repos are separate repositories
 card-repo/
+card-overview-repo/
 
 # Python
 __pycache__/

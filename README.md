@@ -22,6 +22,15 @@ Verbindet sich dauerhaft per HTTPS mit dem Gerät und liefert Zutritts-Events, P
 4. Home Assistant neu starten
 5. **Einstellungen → Geräte & Dienste → Integration hinzufügen → Hikvision Access Control**
 
+### Lovelace-Karten (optional, eigene HACS-Repos)
+
+| Repo | Karte |
+|------|--------|
+| [hikvision-access-card](https://github.com/yourusername/hikvision-access-card) | Ein Terminal: `custom:hikvision-access-card` |
+| [hikvision-access-overview-card](https://github.com/yourusername/hikvision-access-overview-card) | Mehrere Terminals: `custom:hikvision-access-overview-card` |
+
+Jeweils unter HACS → **Frontend** als **Lovelace**-Repository hinzufügen und installieren.
+
 ---
 
 ## Einrichtung
